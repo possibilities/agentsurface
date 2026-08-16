@@ -18,6 +18,9 @@ import {
   buildFormLines,
   buildPlan,
   createForm,
+  cycleEffort,
+  cycleHarness,
+  cycleModel,
   failRun,
   handleFormKey,
   setProject,
@@ -148,6 +151,32 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
         paint();
       },
     },
+    ...(
+      [
+        ["harness", "H", cycleHarness],
+        ["model", "M", cycleModel],
+        ["effort", "E", cycleEffort],
+      ] as const
+    ).flatMap(([field, letter, cycle]) => [
+      {
+        id: `${field}-next`,
+        key: letter,
+        label: `next ${field}`,
+        onRun: () => {
+          cycle(state, 1);
+          paint();
+        },
+      },
+      {
+        id: `${field}-previous`,
+        key: `⇧${letter}`,
+        label: `previous ${field}`,
+        onRun: () => {
+          cycle(state, -1);
+          paint();
+        },
+      },
+    ]),
     { id: "quit", key: "ESC", label: "quit without launching", onRun: () => shutdown(0) },
   ];
 

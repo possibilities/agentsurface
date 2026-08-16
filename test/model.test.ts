@@ -190,6 +190,30 @@ describe("direct keys", () => {
     expect(handleFormKey(state, key("p")).kind).toBe("chooseProject");
   });
 
+  test("h, m, and e cycle the cascade with shift going backwards, from select rows only", () => {
+    const state = form();
+    state.focus = "project";
+    handleFormKey(state, key("h"));
+    expect(currentHarness(state).harness).toBe("codex");
+    expect(state.focus as string).toBe("harness");
+    handleFormKey(state, { name: "h", sequence: "H", shift: true });
+    expect(currentHarness(state).harness).toBe("claude");
+    expect(currentModel(state).model).toBe("opus");
+
+    handleFormKey(state, key("m"));
+    expect(currentModel(state).model).toBe("fable");
+    expect(state.focus as string).toBe("model");
+    handleFormKey(state, key("e"));
+    expect(currentEffort(state)).toBe("high");
+    handleFormKey(state, { name: "E", sequence: "E" });
+    expect(currentEffort(state)).toBe("medium");
+
+    state.focus = "prompt";
+    type(state, "hme");
+    expect(state.prompt).toBe("hme");
+    expect(currentModel(state).model).toBe("fable");
+  });
+
   test("w toggles the worktree from a select row, not from text", () => {
     const state = form();
     state.focus = "harness";

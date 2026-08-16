@@ -133,21 +133,37 @@ function cycleValue(state: FormState, delta: number): void {
       toggleWorktree(state);
       return;
     case "harness":
-      state.harnessIndex = wrap(state.harnessIndex, delta, state.harnesses.length);
-      snapToHarnessDefaults(state);
+      cycleHarness(state, delta);
       return;
-    case "model": {
-      const keep = currentEffort(state);
-      state.modelIndex = wrap(state.modelIndex, delta, currentHarness(state).models.length);
-      snapEffort(state, keep);
+    case "model":
+      cycleModel(state, delta);
       return;
-    }
     case "effort":
-      state.effortIndex = wrap(state.effortIndex, delta, currentModel(state).efforts.length);
+      cycleEffort(state, delta);
       return;
     default:
       return;
   }
+}
+
+/** The cascade cyclers focus their row as they change it, so a palette run
+ * or a direct key shows where the change landed. */
+export function cycleHarness(state: FormState, delta: number): void {
+  state.focus = "harness";
+  state.harnessIndex = wrap(state.harnessIndex, delta, state.harnesses.length);
+  snapToHarnessDefaults(state);
+}
+
+export function cycleModel(state: FormState, delta: number): void {
+  state.focus = "model";
+  const keep = currentEffort(state);
+  state.modelIndex = wrap(state.modelIndex, delta, currentHarness(state).models.length);
+  snapEffort(state, keep);
+}
+
+export function cycleEffort(state: FormState, delta: number): void {
+  state.focus = "effort";
+  state.effortIndex = wrap(state.effortIndex, delta, currentModel(state).efforts.length);
 }
 
 export function toggleWorktree(state: FormState): void {
@@ -294,12 +310,26 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
     }
     return { kind: "none" };
   }
-  if (name === "p") return { kind: "chooseProject" };
-  if (name === "w") {
-    toggleWorktree(state);
-    return { kind: "none" };
+  const letter = key.sequence !== undefined && key.sequence.length === 1 ? key.sequence : name;
+  const backward = key.shift === true || (letter >= "A" && letter <= "Z");
+  switch (letter.toLowerCase()) {
+    case "p":
+      return { kind: "chooseProject" };
+    case "w":
+      toggleWorktree(state);
+      return { kind: "none" };
+    case "h":
+      cycleHarness(state, backward ? -1 : 1);
+      return { kind: "none" };
+    case "m":
+      cycleModel(state, backward ? -1 : 1);
+      return { kind: "none" };
+    case "e":
+      cycleEffort(state, backward ? -1 : 1);
+      return { kind: "none" };
+    default:
+      return { kind: "none" };
   }
-  return { kind: "none" };
 }
 
 export interface LaunchPlan {
