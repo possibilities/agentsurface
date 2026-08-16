@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 import { CliError, UsageError } from "./errors.ts";
 import { TOP_HELP, VERSION } from "./help.ts";
-import { HerdrError } from "./herdr.ts";
+import { createHerdrCall, HerdrError } from "./herdr.ts";
 import { runLaunch } from "./launch/app.ts";
+import { executeLaunch, notifyLaunchFailure, parseDetachedLaunch } from "./launch/executor.ts";
+import { launchLogPath } from "./state.ts";
 
 /** The launcher usually runs inside a herdr popup, which closes with the
  * process — hold a failure on screen until a key or a timeout, so the
@@ -61,6 +63,26 @@ async function main(argv: string[]): Promise<number> {
         console.error(`error: ${(error as Error).message ?? String(error)}`);
       }
       await holdForKeypress();
+      return 1;
+    }
+  }
+  if (first === "execute-launch") {
+    // Internal: the launcher spawns this detached so the popup closes the
+    // moment a launch is submitted. There is no terminal to hold — errors go
+    // to stderr and, best-effort, to a herdr notification.
+    try {
+      const plan = parseDetachedLaunch(argv[1] ?? "");
+      const env = process.env;
+      await executeLaunch(createHerdrCall(env), launchLogPath(env, env["HOME"] ?? ""), plan);
+      return 0;
+    } catch (error) {
+      if (error instanceof UsageError) {
+        console.error(error.message);
+        return 2;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`error: ${message}`);
+      await notifyLaunchFailure(process.env, message);
       return 1;
     }
   }

@@ -35,7 +35,8 @@ export interface OverlayTokens {
 export interface ListOverlay {
   root: InstanceType<OpenTui["BoxRenderable"]>;
   isOpen(): boolean;
-  open(): void;
+  /** Opens with the selection on `at` — the row already applied, usually. */
+  open(at?: number): void;
   close(): void;
   /** Keys reach it only while open; ctrl+c always falls through. */
   handleKey(key: {
@@ -125,10 +126,10 @@ export function createListOverlay(
     item.onRun();
   };
 
-  const openOverlay = (): void => {
+  const openOverlay = (at?: number): void => {
     open = true;
     filter = "";
-    selected = 0;
+    selected = at !== undefined && at >= 0 ? at : 0;
     start = 0;
     root.visible = true;
     layout();

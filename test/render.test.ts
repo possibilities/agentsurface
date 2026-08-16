@@ -1,12 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { LaunchHarness } from "../src/catalog.ts";
-import {
-  beginRunning,
-  buildFormLines,
-  createForm,
-  type FormState,
-  failRun,
-} from "../src/launch/model.ts";
+import { buildFormLines, createForm, type FormState, failRun } from "../src/launch/model.ts";
 import type { ProjectChoice } from "../src/projects.ts";
 
 const HARNESSES: LaunchHarness[] = [
@@ -83,10 +77,10 @@ describe("buildFormLines", () => {
     expect(text).not.toContain("⌃");
   });
 
-  test("running and failed states live in the body with recovery keys", () => {
+  test("confirmation and failure live in the body with recovery keys", () => {
     const state = form();
-    beginRunning(state, "CREATING WORKSPACE");
-    expect(rows(state, 76).join("\n")).toContain("↻ CREATING WORKSPACE");
+    state.notice = { text: "started claude · ~/code/alpha", tone: "ok" };
+    expect(rows(state, 76).join("\n")).toContain("started claude · ~/code/alpha");
     failRun(state, "workspace create: no repo");
     const text = rows(state, 76).join("\n");
     expect(text).toContain("FAILED · workspace create: no repo");

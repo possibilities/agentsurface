@@ -43,6 +43,21 @@ export function scanProjects(roots: readonly string[], home: string): string[] {
   return found;
 }
 
+/** The project the operator was in when the launcher opened: the longest
+ * project path containing the cwd. Falls back to the list head. */
+export function projectIndexForCwd(projects: readonly ProjectChoice[], cwd: string): number {
+  let best = 0;
+  let bestLength = -1;
+  projects.forEach((project, index) => {
+    const inside = cwd === project.path || cwd.startsWith(`${project.path}/`);
+    if (inside && project.path.length > bestLength) {
+      best = index;
+      bestLength = project.path.length;
+    }
+  });
+  return best;
+}
+
 /** Most-launched first, alphabetical on ties — which is also the cold-start
  * order, when nothing has been launched yet. */
 export function orderProjects(

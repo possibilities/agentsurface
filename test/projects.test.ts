@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { orderProjects, scanProjects } from "../src/projects.ts";
+import { orderProjects, projectIndexForCwd, scanProjects } from "../src/projects.ts";
 
 let temps: string[] = [];
 
@@ -26,6 +26,18 @@ describe("scanProjects", () => {
     writeFileSync(join(home, "code", "notes.md"), "");
     const found = scanProjects(["~/code", "~/src"], home);
     expect(found).toEqual([join(home, "code", "alpha"), join(home, "code", "beta")]);
+  });
+});
+
+describe("projectIndexForCwd", () => {
+  test("the longest containing project wins; no match falls back to the head", () => {
+    const projects = [
+      { path: "/h/code/app", display: "app", count: 0 },
+      { path: "/h/code/app-extras", display: "app-extras", count: 0 },
+    ];
+    expect(projectIndexForCwd(projects, "/h/code/app-extras/src")).toBe(1);
+    expect(projectIndexForCwd(projects, "/h/code/app")).toBe(0);
+    expect(projectIndexForCwd(projects, "/elsewhere")).toBe(0);
   });
 });
 

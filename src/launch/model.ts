@@ -1,5 +1,5 @@
 import type { LaunchHarness } from "../catalog.ts";
-import type { ProjectChoice } from "../projects.ts";
+import { type ProjectChoice, projectIndexForCwd } from "../projects.ts";
 import { GLYPHS, type Line, type Span } from "./theme.ts";
 
 /**
@@ -24,16 +24,17 @@ export interface KeyEvent {
 
 export type Field = "prompt" | "project" | "worktree" | "branch" | "harness" | "model" | "effort";
 
-export type Phase =
-  | { kind: "form" }
-  | { kind: "running"; step: string }
-  | { kind: "failed"; message: string };
+export type Phase = { kind: "form" } | { kind: "failed"; message: string };
+
+/** The rows whose values are picked from a list overlay. */
+export type ChooseField = "project" | "harness" | "model" | "effort";
 
 export type FormAction =
   | { kind: "none" }
   | { kind: "quit" }
   | { kind: "launch" }
-  | { kind: "chooseProject" };
+  | { kind: "launchAnother" }
+  | { kind: "choose"; field: ChooseField };
 
 export interface FormState {
   prompt: string;
@@ -49,12 +50,23 @@ export interface FormState {
   effortIndex: number;
   focus: Field;
   phase: Phase;
-  notice: string | null;
+  notice: { text: string; tone: "warn" | "ok" } | null;
+}
+
+/** The previous launch's cascade choices, replayed as this form's defaults. */
+export interface RememberedLevel {
+  harness: string;
+  model: string;
+  effort: string;
 }
 
 export function createForm(inputs: {
   projects: ProjectChoice[];
   harnesses: LaunchHarness[];
+  /** The focused pane's cwd; preselects the project the launcher opened over. */
+  cwd?: string;
+  /** Applied where the catalog still allows it; catalog defaults otherwise. */
+  remembered?: RememberedLevel | null;
 }): FormState {
   const state: FormState = {
     prompt: "",
@@ -73,7 +85,25 @@ export function createForm(inputs: {
     notice: null,
   };
   snapToHarnessDefaults(state);
+  if (inputs.remembered != null) applyRemembered(state, inputs.remembered);
+  if (inputs.cwd !== undefined) {
+    state.projectIndex = projectIndexForCwd(state.projects, inputs.cwd);
+  }
+  state.focus = "prompt";
   return state;
+}
+
+/** Each dimension applies only while the previous one matched, so a renamed
+ * model or a narrowed effort degrades to that level's catalog default. */
+function applyRemembered(state: FormState, remembered: RememberedLevel): void {
+  const harness = state.harnesses.findIndex((one) => one.harness === remembered.harness);
+  if (harness < 0) return;
+  setHarness(state, harness);
+  const model = currentHarness(state).models.findIndex((one) => one.model === remembered.model);
+  if (model < 0) return;
+  setModel(state, model);
+  const effort = currentModel(state).efforts.indexOf(remembered.effort);
+  if (effort >= 0) setEffort(state, effort);
 }
 
 export function currentHarness(state: FormState): LaunchHarness {
@@ -133,37 +163,41 @@ function cycleValue(state: FormState, delta: number): void {
       toggleWorktree(state);
       return;
     case "harness":
-      cycleHarness(state, delta);
+      setHarness(state, wrap(state.harnessIndex, delta, state.harnesses.length));
       return;
     case "model":
-      cycleModel(state, delta);
+      setModel(state, wrap(state.modelIndex, delta, currentHarness(state).models.length));
       return;
     case "effort":
-      cycleEffort(state, delta);
+      setEffort(state, wrap(state.effortIndex, delta, currentModel(state).efforts.length));
       return;
     default:
       return;
   }
 }
 
-/** The cascade cyclers focus their row as they change it, so a palette run
- * or a direct key shows where the change landed. */
-export function cycleHarness(state: FormState, delta: number): void {
+/** The picker setters focus the row they change, so the applied choice is
+ * visible where it landed. Cascade snapping follows: a harness brings its
+ * default model and effort; a model keeps the operator's effort when it may. */
+export function setHarness(state: FormState, index: number): void {
+  if (index < 0 || index >= state.harnesses.length) return;
   state.focus = "harness";
-  state.harnessIndex = wrap(state.harnessIndex, delta, state.harnesses.length);
+  state.harnessIndex = index;
   snapToHarnessDefaults(state);
 }
 
-export function cycleModel(state: FormState, delta: number): void {
+export function setModel(state: FormState, index: number): void {
+  if (index < 0 || index >= currentHarness(state).models.length) return;
   state.focus = "model";
   const keep = currentEffort(state);
-  state.modelIndex = wrap(state.modelIndex, delta, currentHarness(state).models.length);
+  state.modelIndex = index;
   snapEffort(state, keep);
 }
 
-export function cycleEffort(state: FormState, delta: number): void {
+export function setEffort(state: FormState, index: number): void {
+  if (index < 0 || index >= currentModel(state).efforts.length) return;
   state.focus = "effort";
-  state.effortIndex = wrap(state.effortIndex, delta, currentModel(state).efforts.length);
+  state.effortIndex = index;
 }
 
 export function toggleWorktree(state: FormState): void {
@@ -213,7 +247,6 @@ function printable(key: KeyEvent): string | null {
 }
 
 export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
-  if (state.phase.kind === "running") return { kind: "none" };
   if (state.phase.kind === "failed") {
     if (key.name === "return" || key.name === "enter") {
       state.phase = { kind: "form" };
@@ -303,30 +336,28 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
     return { kind: "none" };
   }
   if (key.sequence === " " || name === "space") {
-    if (state.focus === "project") return { kind: "chooseProject" };
     if (state.focus === "worktree") {
       toggleWorktree(state);
       return { kind: "none" };
     }
-    return { kind: "none" };
+    // Text fields consumed their space above; every other row is a chooser.
+    return { kind: "choose", field: state.focus };
   }
   const letter = key.sequence !== undefined && key.sequence.length === 1 ? key.sequence : name;
-  const backward = key.shift === true || (letter >= "A" && letter <= "Z");
   switch (letter.toLowerCase()) {
     case "p":
-      return { kind: "chooseProject" };
+      return { kind: "choose", field: "project" };
+    case "h":
+      return { kind: "choose", field: "harness" };
+    case "m":
+      return { kind: "choose", field: "model" };
+    case "e":
+      return { kind: "choose", field: "effort" };
     case "w":
       toggleWorktree(state);
       return { kind: "none" };
-    case "h":
-      cycleHarness(state, backward ? -1 : 1);
-      return { kind: "none" };
-    case "m":
-      cycleModel(state, backward ? -1 : 1);
-      return { kind: "none" };
-    case "e":
-      cycleEffort(state, backward ? -1 : 1);
-      return { kind: "none" };
+    case "a":
+      return { kind: "launchAnother" };
     default:
       return { kind: "none" };
   }
@@ -346,11 +377,11 @@ export interface LaunchPlan {
 /** Validate and freeze the launch. A refusal states itself on the form. */
 export function buildPlan(state: FormState): LaunchPlan | null {
   if (state.projects.length === 0) {
-    state.notice = "no projects under the configured roots";
+    state.notice = { text: "no projects under the configured roots", tone: "warn" };
     return null;
   }
   if (state.worktree && state.branch === "") {
-    state.notice = "a worktree needs a branch name";
+    state.notice = { text: "a worktree needs a branch name", tone: "warn" };
     state.focus = "branch";
     return null;
   }
@@ -368,12 +399,20 @@ export function buildPlan(state: FormState): LaunchPlan | null {
   };
 }
 
-export function beginRunning(state: FormState, step: string): void {
-  state.phase = { kind: "running", step };
-}
-
 export function failRun(state: FormState, message: string): void {
   state.phase = { kind: "failed", message };
+}
+
+/** After an unfocused launch: a blank intent for the next one, with the
+ * config rows keeping their choices. */
+export function resetForAnother(state: FormState, message: string): void {
+  state.prompt = "";
+  state.cursor = 0;
+  state.branch = "";
+  state.branchEdited = false;
+  state.focus = "prompt";
+  state.phase = { kind: "form" };
+  state.notice = { text: message, tone: "ok" };
 }
 
 // --- rendering ------------------------------------------------------------
@@ -537,9 +576,6 @@ export function buildFormLines(state: FormState, width: number): Line[] {
 }
 
 function statusLines(state: FormState, width: number): Line[] {
-  if (state.phase.kind === "running") {
-    return [[span(centered(`${GLYPHS.busy} ${state.phase.step}`, width), "accent")]];
-  }
   if (state.phase.kind === "failed") {
     return [
       [
@@ -552,7 +588,8 @@ function statusLines(state: FormState, width: number): Line[] {
     ];
   }
   if (state.notice !== null) {
-    return [[span(centered(state.notice, width), "local")]];
+    const tone = state.notice.tone === "ok" ? "ok" : "local";
+    return [[span(centered(fit(state.notice.text, width - 2), width), tone)]];
   }
   return [];
 }

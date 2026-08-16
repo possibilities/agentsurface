@@ -10,6 +10,10 @@ import {
   failRun,
   handleFormKey,
   type KeyEvent,
+  resetForAnother,
+  setEffort,
+  setHarness,
+  setModel,
   slugify,
 } from "../src/launch/model.ts";
 import type { ProjectChoice } from "../src/projects.ts";
@@ -182,36 +186,46 @@ describe("the cascade", () => {
 });
 
 describe("direct keys", () => {
-  test("space or p opens the project picker from a select row", () => {
+  test("space and the letter keys open the choosers from select rows", () => {
     const state = form();
     state.focus = "project";
-    expect(handleFormKey(state, key(" ", { sequence: " " })).kind).toBe("chooseProject");
+    expect(handleFormKey(state, key(" ", { sequence: " " }))).toEqual({
+      kind: "choose",
+      field: "project",
+    });
     state.focus = "effort";
-    expect(handleFormKey(state, key("p")).kind).toBe("chooseProject");
+    expect(handleFormKey(state, key("p"))).toEqual({ kind: "choose", field: "project" });
+    expect(handleFormKey(state, key("h"))).toEqual({ kind: "choose", field: "harness" });
+    expect(handleFormKey(state, key("m"))).toEqual({ kind: "choose", field: "model" });
+    expect(handleFormKey(state, key("e"))).toEqual({ kind: "choose", field: "effort" });
+    state.focus = "harness";
+    expect(handleFormKey(state, key(" ", { sequence: " " }))).toEqual({
+      kind: "choose",
+      field: "harness",
+    });
   });
 
-  test("h, m, and e cycle the cascade with shift going backwards, from select rows only", () => {
+  test("a submits for another; letters in text fields stay text", () => {
     const state = form();
-    state.focus = "project";
-    handleFormKey(state, key("h"));
-    expect(currentHarness(state).harness).toBe("codex");
-    expect(state.focus as string).toBe("harness");
-    handleFormKey(state, { name: "h", sequence: "H", shift: true });
-    expect(currentHarness(state).harness).toBe("claude");
-    expect(currentModel(state).model).toBe("opus");
-
-    handleFormKey(state, key("m"));
-    expect(currentModel(state).model).toBe("fable");
-    expect(state.focus as string).toBe("model");
-    handleFormKey(state, key("e"));
-    expect(currentEffort(state)).toBe("high");
-    handleFormKey(state, { name: "E", sequence: "E" });
-    expect(currentEffort(state)).toBe("medium");
-
+    state.focus = "model";
+    expect(handleFormKey(state, key("a")).kind).toBe("launchAnother");
     state.focus = "prompt";
-    type(state, "hme");
-    expect(state.prompt).toBe("hme");
-    expect(currentModel(state).model).toBe("fable");
+    type(state, "ahme");
+    expect(state.prompt).toBe("ahme");
+  });
+
+  test("the picker setters apply the cascade snapping", () => {
+    const state = form();
+    setHarness(state, 1);
+    expect(currentHarness(state).harness).toBe("codex");
+    expect(currentModel(state).model).toBe("sol");
+    expect(currentEffort(state)).toBe("high");
+    setEffort(state, 5);
+    expect(currentEffort(state)).toBe("ultra");
+    setModel(state, 2);
+    expect(currentModel(state).model).toBe("spark");
+    expect(currentEffort(state)).toBe("low");
+    expect(state.focus as string).toBe("model");
   });
 
   test("w toggles the worktree from a select row, not from text", () => {
@@ -243,14 +257,14 @@ describe("buildPlan", () => {
     state.worktree = true;
     const plan = buildPlan(state);
     expect(plan).toBeNull();
-    expect(state.notice).toContain("branch");
+    expect(state.notice?.text).toContain("branch");
     expect(state.focus).toBe("branch");
   });
 
   test("no projects refuses with a notice", () => {
     const state = createForm({ projects: [], harnesses: HARNESSES });
     expect(buildPlan(state)).toBeNull();
-    expect(state.notice).toContain("no projects");
+    expect(state.notice?.text).toContain("no projects");
   });
 });
 
@@ -263,6 +277,65 @@ describe("failed phase", () => {
     expect(state.phase.kind).toBe("form");
     failRun(state, "again");
     expect(handleFormKey(state, key("escape")).kind).toBe("quit");
+  });
+});
+
+describe("createForm defaults", () => {
+  test("remembers the last launch's cascade where the catalog allows", () => {
+    const state = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      remembered: { harness: "codex", model: "luna", effort: "max" },
+    });
+    expect(currentHarness(state).harness).toBe("codex");
+    expect(currentModel(state).model).toBe("luna");
+    expect(currentEffort(state)).toBe("max");
+    expect(state.focus).toBe("prompt");
+  });
+
+  test("a renamed model or narrowed effort degrades to catalog defaults", () => {
+    const state = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      remembered: { harness: "codex", model: "gone", effort: "max" },
+    });
+    expect(currentModel(state).model).toBe("sol");
+    expect(currentEffort(state)).toBe("high");
+    const narrowed = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      remembered: { harness: "codex", model: "spark", effort: "ultra" },
+    });
+    expect(currentModel(narrowed).model).toBe("spark");
+    // ultra is outlawed; the harness default (high) survives because spark
+    // allows it, per the keep-when-allowed rule.
+    expect(currentEffort(narrowed)).toBe("high");
+  });
+
+  test("the cwd picks the project the launcher opened over", () => {
+    const state = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      cwd: "/home/u/code/beta/sub/dir",
+    });
+    expect(state.projects[state.projectIndex]?.display).toBe("~/code/beta");
+  });
+});
+
+describe("resetForAnother", () => {
+  test("clears the intent and branch, keeps the config, and confirms", () => {
+    const state = form();
+    type(state, "First launch");
+    state.worktree = true;
+    setHarness(state, 1);
+    resetForAnother(state, "started codex · ~/code/alpha");
+    expect(state.prompt).toBe("");
+    expect(state.branch).toBe("");
+    expect(state.branchEdited).toBe(false);
+    expect(state.worktree).toBe(true);
+    expect(currentHarness(state).harness).toBe("codex");
+    expect(state.focus).toBe("prompt");
+    expect(state.notice?.tone).toBe("ok");
   });
 });
 

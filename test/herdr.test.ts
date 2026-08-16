@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  createTab,
   createWorkspace,
   createWorktree,
   type HerdrCall,
   HerdrError,
   type HerdrResponse,
   invoke,
+  listPanes,
+  listWorkspaces,
   liveAgentNames,
   nextAgentName,
   startAgentWhenReady,
@@ -31,10 +34,14 @@ const CREATED: HerdrResponse = {
   },
 };
 
-describe("createWorkspace / createWorktree", () => {
-  test("phrases the request and reads the created surface", async () => {
+describe("createWorkspace / createWorktree / createTab", () => {
+  test("phrases the requests, carrying the focus decision", async () => {
     const { call, calls } = fake([CREATED]);
-    const surface = await createWorkspace(call, { cwd: "/code/alpha", label: "alpha" });
+    const surface = await createWorkspace(call, {
+      cwd: "/code/alpha",
+      label: "alpha",
+      focus: true,
+    });
     expect(surface).toEqual({ workspaceId: "w9", paneId: "w9:p1" });
     expect(calls[0]).toEqual([
       "workspace",
@@ -47,7 +54,7 @@ describe("createWorkspace / createWorktree", () => {
     ]);
 
     const worktree = fake([CREATED]);
-    await createWorktree(worktree.call, { cwd: "/code/alpha", branch: "fix-it" });
+    await createWorktree(worktree.call, { cwd: "/code/alpha", branch: "fix-it", focus: false });
     expect(worktree.calls[0]).toEqual([
       "worktree",
       "create",
@@ -55,7 +62,24 @@ describe("createWorkspace / createWorktree", () => {
       "/code/alpha",
       "--branch",
       "fix-it",
-      "--focus",
+      "--no-focus",
+    ]);
+
+    const tab = fake([{ result: { tab: { tab_id: "w9:t2" }, root_pane: { pane_id: "w9:p7" } } }]);
+    const tabSurface = await createTab(tab.call, {
+      workspaceId: "w9",
+      cwd: "/code/alpha",
+      focus: false,
+    });
+    expect(tabSurface).toEqual({ workspaceId: "w9", paneId: "w9:p7" });
+    expect(tab.calls[0]).toEqual([
+      "tab",
+      "create",
+      "--workspace",
+      "w9",
+      "--cwd",
+      "/code/alpha",
+      "--no-focus",
     ]);
   });
 
@@ -63,11 +87,35 @@ describe("createWorkspace / createWorktree", () => {
     const { call } = fake([{ result: { workspace: { workspace_id: "w9" } } }]);
     let caught: unknown;
     try {
-      await createWorkspace(call, { cwd: "/code/alpha", label: "alpha" });
+      await createWorkspace(call, { cwd: "/code/alpha", label: "alpha", focus: true });
     } catch (error) {
       caught = error;
     }
     expect(caught).toBeInstanceOf(HerdrError);
+  });
+});
+
+describe("surface listings", () => {
+  test("read workspaces and panes, tolerating partial rows", async () => {
+    const workspaces = fake([
+      { result: { workspaces: [{ workspace_id: "w1", label: "alpha" }, { label: "orphan" }] } },
+    ]);
+    expect(await listWorkspaces(workspaces.call)).toEqual([{ workspaceId: "w1", label: "alpha" }]);
+
+    const panes = fake([
+      {
+        result: {
+          panes: [
+            { workspace_id: "w1", cwd: "/code/alpha", foreground_cwd: "/code/alpha/sub" },
+            { workspace_id: "w2" },
+          ],
+        },
+      },
+    ]);
+    expect(await listPanes(panes.call)).toEqual([
+      { workspaceId: "w1", cwd: "/code/alpha", foregroundCwd: "/code/alpha/sub" },
+      { workspaceId: "w2", cwd: null, foregroundCwd: null },
+    ]);
   });
 });
 

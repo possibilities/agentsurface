@@ -10,29 +10,37 @@ one integration; the first is `launch`.
 agentsurface launch
 ```
 
-One screen, prompt-first: type what you want done, then confirm the rest.
+One screen, prompt-first: type what you want done (or don't — the intent is
+optional), then confirm the rest.
 
-- **Intent** — the multiline prompt at the top; it becomes the agent's first
-  prompt. Enter moves on to the configuration rows.
+- **Intent** — the prompt at the top; it rides the launch as the agent's
+  first prompt. Enter moves on to the configuration rows.
 - **Project** — directories one level under the configured roots, ordered by
-  how often you have launched into them (alphabetical until then). Space or
-  `p` opens the filterable picker.
-- **Worktree** — off by default. On, herdr creates a new git worktree for
-  the project (branch name suggested from the intent, editable) and opens it
-  as its own workspace.
+  how often you have launched into them (alphabetical until then), and
+  preselected from the pane the launcher opened over. Space or `p` opens the
+  filterable picker.
+- **Worktree** — off by default; `w` toggles. On, herdr creates a new git
+  worktree for the project (branch name suggested from the intent, editable)
+  and opens it as its own workspace.
 - **Harness → model → effort** — the cascade from agentlaunch's catalog,
   fetched at runtime via `agentlaunch x-catalog`; only validated
-  combinations are offered, e.g. `claude → fable → xhigh`.
+  combinations are offered, e.g. `claude → fable → xhigh`. Each row is a
+  filterable picker too (`h`, `m`, `e`, or space on the row), and the form
+  defaults to the previous launch's choices where the catalog still allows
+  them.
 
-Enter on any configuration row launches: agentsurface creates the herdr
-workspace (or worktree) focused, starts the agent in its root pane —
-`herdr agent start` runs the bare harness command, which is the fleet shim
-into agentlaunch, so balancing, yolo policy, and model injection all apply —
-submits the intent, records the launch, and exits. Closing the popup lands
-you in the new workspace.
+Enter submits and the popup closes at once; the launch continues detached.
+A project already on the surface gets a new tab in its workspace — a
+workspace is created only when none exists — the agent starts in the fresh
+pane (`herdr agent start` runs the bare harness command, the fleet shim
+into agentlaunch, so balancing, yolo policy, and model injection all
+apply), the intent submits, and the launch is recorded. You land on it as
+it appears; a background failure arrives as a herdr notification.
 
-Every action lives in the ctrl+k command palette. Esc quits without
-launching; ctrl+c is always the terminal interrupt.
+`a` submits without taking focus and clears the form for the next intent —
+fire several launches from one popup. Every action lives in the ctrl+k
+command palette. Esc quits without launching; ctrl+c is always the
+terminal interrupt.
 
 The launcher is made to live on a herdr popup keybinding:
 

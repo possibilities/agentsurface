@@ -52,3 +52,41 @@ export function appendLaunch(path: string, record: LaunchRecord): void {
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, `${JSON.stringify(record)}\n`);
 }
+
+/** The last launch's cascade choices, for the next form's defaults. */
+export interface LastLevel {
+  harness: string;
+  model: string;
+  effort: string;
+}
+
+export function readLastLaunch(path: string): LastLevel | null {
+  if (!existsSync(path)) return null;
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+  let last: LastLevel | null = null;
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      const record = JSON.parse(line) as {
+        harness?: unknown;
+        model?: unknown;
+        effort?: unknown;
+      };
+      if (
+        typeof record.harness === "string" &&
+        typeof record.model === "string" &&
+        typeof record.effort === "string"
+      ) {
+        last = { harness: record.harness, model: record.model, effort: record.effort };
+      }
+    } catch {
+      // A garbled line names no choices.
+    }
+  }
+  return last;
+}

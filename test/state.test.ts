@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendLaunch, readLaunchCounts } from "../src/state.ts";
+import { appendLaunch, readLastLaunch, readLaunchCounts } from "../src/state.ts";
 
 let temps: string[] = [];
 
@@ -47,5 +47,14 @@ describe("the launch log", () => {
     appendFileSync(path, "{not json\n");
     appendLaunch(path, RECORD);
     expect(readLaunchCounts(path).get("/code/alpha")).toBe(2);
+  });
+
+  test("remembers the last launch's cascade, skipping garbage tails", () => {
+    const path = logPath();
+    expect(readLastLaunch(path)).toBeNull();
+    appendLaunch(path, RECORD);
+    appendLaunch(path, { ...RECORD, harness: "codex", model: "sol", effort: "ultra" });
+    appendFileSync(path, "{garbage\n");
+    expect(readLastLaunch(path)).toEqual({ harness: "codex", model: "sol", effort: "ultra" });
   });
 });

@@ -98,7 +98,7 @@ function surfaceFrom(result: unknown, what: string): CreatedSurface {
 
 export async function createWorkspace(
   call: HerdrCall,
-  options: { cwd: string; label: string },
+  options: { cwd: string; label: string; focus: boolean },
 ): Promise<CreatedSurface> {
   const result = await invoke(call, [
     "workspace",
@@ -107,14 +107,14 @@ export async function createWorkspace(
     options.cwd,
     "--label",
     options.label,
-    "--focus",
+    options.focus ? "--focus" : "--no-focus",
   ]);
   return surfaceFrom(result, "workspace create");
 }
 
 export async function createWorktree(
   call: HerdrCall,
-  options: { cwd: string; branch: string },
+  options: { cwd: string; branch: string; focus: boolean },
 ): Promise<CreatedSurface> {
   const result = await invoke(call, [
     "worktree",
@@ -123,9 +123,77 @@ export async function createWorktree(
     options.cwd,
     "--branch",
     options.branch,
-    "--focus",
+    options.focus ? "--focus" : "--no-focus",
   ]);
   return surfaceFrom(result, "worktree create");
+}
+
+export async function createTab(
+  call: HerdrCall,
+  options: { workspaceId: string; cwd: string; focus: boolean },
+): Promise<CreatedSurface> {
+  const result = (await invoke(call, [
+    "tab",
+    "create",
+    "--workspace",
+    options.workspaceId,
+    "--cwd",
+    options.cwd,
+    options.focus ? "--focus" : "--no-focus",
+  ])) as { root_pane?: { pane_id?: unknown } } | null;
+  const paneId = result?.root_pane?.pane_id;
+  if (typeof paneId !== "string") {
+    throw new HerdrError("herdr's tab create response named no root pane");
+  }
+  return { workspaceId: options.workspaceId, paneId };
+}
+
+export async function focusWorkspace(call: HerdrCall, workspaceId: string): Promise<void> {
+  await invoke(call, ["workspace", "focus", workspaceId]);
+}
+
+export interface WorkspaceSummary {
+  workspaceId: string;
+  label: string | null;
+}
+
+export async function listWorkspaces(call: HerdrCall): Promise<WorkspaceSummary[]> {
+  const result = (await invoke(call, ["workspace", "list"])) as { workspaces?: unknown } | null;
+  if (!Array.isArray(result?.workspaces)) return [];
+  const summaries: WorkspaceSummary[] = [];
+  for (const row of result.workspaces) {
+    const workspaceId = (row as { workspace_id?: unknown }).workspace_id;
+    const label = (row as { label?: unknown }).label;
+    if (typeof workspaceId === "string") {
+      summaries.push({ workspaceId, label: typeof label === "string" ? label : null });
+    }
+  }
+  return summaries;
+}
+
+export interface PaneSummary {
+  workspaceId: string;
+  cwd: string | null;
+  foregroundCwd: string | null;
+}
+
+export async function listPanes(call: HerdrCall): Promise<PaneSummary[]> {
+  const result = (await invoke(call, ["pane", "list"])) as { panes?: unknown } | null;
+  if (!Array.isArray(result?.panes)) return [];
+  const summaries: PaneSummary[] = [];
+  for (const row of result.panes) {
+    const workspaceId = (row as { workspace_id?: unknown }).workspace_id;
+    const cwd = (row as { cwd?: unknown }).cwd;
+    const foregroundCwd = (row as { foreground_cwd?: unknown }).foreground_cwd;
+    if (typeof workspaceId === "string") {
+      summaries.push({
+        workspaceId,
+        cwd: typeof cwd === "string" ? cwd : null,
+        foregroundCwd: typeof foregroundCwd === "string" ? foregroundCwd : null,
+      });
+    }
+  }
+  return summaries;
 }
 
 export async function liveAgentNames(call: HerdrCall): Promise<Set<string>> {

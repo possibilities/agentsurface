@@ -1,0 +1,171 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { UsageError } from "../src/errors.ts";
+import type { HerdrCall, HerdrResponse } from "../src/herdr.ts";
+import {
+  type DetachedLaunch,
+  executeLaunch,
+  findProjectWorkspace,
+  parseDetachedLaunch,
+} from "../src/launch/executor.ts";
+
+let temps: string[] = [];
+
+afterEach(() => {
+  for (const temp of temps) rmSync(temp, { recursive: true, force: true });
+  temps = [];
+});
+
+function logPath(): string {
+  const temp = mkdtempSync(join(tmpdir(), "agentsurface-executor-"));
+  temps.push(temp);
+  return join(temp, "launches.jsonl");
+}
+
+/** A canned herdr: records every argv and answers from a queue. */
+function fake(responses: HerdrResponse[]): { call: HerdrCall; calls: string[][] } {
+  const calls: string[][] = [];
+  const queue = [...responses];
+  const call: HerdrCall = (args) => {
+    calls.push(args);
+    const next = queue.length > 1 ? queue.shift()! : queue[0]!;
+    return Promise.resolve(next);
+  };
+  return { call, calls };
+}
+
+const PLAN: DetachedLaunch = {
+  project: { path: "/code/alpha", display: "~/code/alpha", count: 0 },
+  worktree: false,
+  branch: null,
+  harness: "claude",
+  model: "fable",
+  effort: "max",
+  level: "fable:max",
+  prompt: "fix it",
+  focus: false,
+};
+
+const CREATED: HerdrResponse = {
+  result: {
+    workspace: { workspace_id: "w9", label: "alpha" },
+    tab: { tab_id: "w9:t1" },
+    root_pane: { pane_id: "w9:p1" },
+  },
+};
+
+describe("parseDetachedLaunch", () => {
+  test("round-trips a plan and refuses anything else", () => {
+    expect(parseDetachedLaunch(JSON.stringify(PLAN))).toEqual(PLAN);
+    for (const bad of ["", "not json", JSON.stringify({ project: {} })]) {
+      let caught: unknown;
+      try {
+        parseDetachedLaunch(bad);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(UsageError);
+    }
+  });
+});
+
+describe("findProjectWorkspace", () => {
+  test("a pane working inside the project wins; a label match backs it up", () => {
+    const byCwd = fake([
+      {
+        result: {
+          panes: [{ workspace_id: "w7", cwd: "/elsewhere", foreground_cwd: "/code/alpha/sub" }],
+        },
+      },
+    ]);
+    expect(findProjectWorkspace(byCwd.call, "/code/alpha")).resolves.toBe("w7");
+
+    const byLabel = fake([
+      { result: { panes: [{ workspace_id: "w7", cwd: "/elsewhere", foreground_cwd: null }] } },
+      { result: { workspaces: [{ workspace_id: "w3", label: "alpha" }] } },
+    ]);
+    expect(findProjectWorkspace(byLabel.call, "/code/alpha")).resolves.toBe("w3");
+
+    const absent = fake([
+      { result: { panes: [] } },
+      { result: { workspaces: [{ workspace_id: "w3", label: "other" }] } },
+    ]);
+    expect(findProjectWorkspace(absent.call, "/code/alpha")).resolves.toBeNull();
+  });
+});
+
+describe("executeLaunch", () => {
+  test("creates an unfocused workspace when the project is absent, retrying a taken name", async () => {
+    const { call, calls } = fake([
+      { result: { panes: [] } },
+      { result: { workspaces: [] } },
+      CREATED,
+      { result: { agents: [{ name: "claude-1" }] } },
+      { error: { code: "agent_name_taken", message: "taken" } },
+      { result: { agents: [{ name: "claude-1" }] } },
+      { result: {} },
+    ]);
+    const path = logPath();
+    await executeLaunch(call, path, PLAN);
+
+    expect(calls[2]).toEqual([
+      "workspace",
+      "create",
+      "--cwd",
+      "/code/alpha",
+      "--label",
+      "alpha",
+      "--no-focus",
+    ]);
+    const starts = calls.filter((args) => args[0] === "agent" && args[1] === "start");
+    expect(starts).toHaveLength(2);
+    expect(starts[1]).toEqual([
+      "agent",
+      "start",
+      "claude-3",
+      "--kind",
+      "claude",
+      "--pane",
+      "w9:p1",
+      "--",
+      "--x-level",
+      "fable:max",
+      "fix it",
+    ]);
+    const record = JSON.parse(readFileSync(path, "utf8").trim());
+    expect(record.agent).toBe("claude-3");
+    expect(record.workspace).toBe("w9");
+  });
+
+  test("adds a tab to the hosting workspace and focuses it when asked", async () => {
+    const { call, calls } = fake([
+      {
+        result: {
+          panes: [{ workspace_id: "w7", cwd: "/code/alpha", foreground_cwd: "/code/alpha" }],
+        },
+      },
+      { result: { tab: { tab_id: "w7:t4" }, root_pane: { pane_id: "w7:p9" } } },
+      { result: {} },
+      { result: { agents: [] } },
+      { result: {} },
+    ]);
+    const path = logPath();
+    await executeLaunch(call, path, { ...PLAN, focus: true });
+
+    expect(calls[1]).toEqual([
+      "tab",
+      "create",
+      "--workspace",
+      "w7",
+      "--cwd",
+      "/code/alpha",
+      "--focus",
+    ]);
+    expect(calls[2]).toEqual(["workspace", "focus", "w7"]);
+    const record = JSON.parse(readFileSync(path, "utf8").trim());
+    expect(record.workspace).toBe("w7");
+    expect(record.agent).toBe("claude-1");
+  });
+});
