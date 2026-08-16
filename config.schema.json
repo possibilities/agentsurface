@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "agentsurface configuration",
+  "description": "Per-user configuration for agentsurface, read from ~/.config/agentsurface/config.json (XDG_CONFIG_HOME relocates the directory). The file is optional: with no file at all, the roots default to ~/code and ~/src. When the file does exist it is validated strictly and every fault is a config_invalid domain error — a config that would be silently misread is worse than none, because a mistyped key would quietly scan the wrong roots.",
+  "type": "object",
+  "properties": {
+    "roots": {
+      "description": "Parent directories scanned one level deep for project directories, in scan order. Omitted entirely: ~/code and ~/src.",
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "One project root; ~ and ~/ expand to the operator's home directory."
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,51 @@
+{
+  "name": "agentsurface",
+  "version": "0.1.0",
+  "description": "Fleet integrations over the herdr surface: launch a balanced agent from a one-screen TUI",
+  "private": false,
+  "keywords": [
+    "ai",
+    "agent",
+    "herdr",
+    "tui",
+    "launcher"
+  ],
+  "homepage": "https://github.com/possibilities/agentsurface#readme",
+  "bugs": "https://github.com/possibilities/agentsurface/issues",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/possibilities/agentsurface.git"
+  },
+  "type": "module",
+  "bin": {
+    "agentsurface": "./src/main.ts"
+  },
+  "files": [
+    "src",
+    "config.schema.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.3.14"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome check --write src test scripts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test --timeout 20000",
+    "generate:schemas": "bun run scripts/generate-schema.ts && biome check --write config.schema.json",
+    "check": "bun run lint && bun run typecheck && bun run test"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.3.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.3",
+    "@types/bun": "1.3.14",
+    "bun-types": "1.3.14",
+    "typescript": "5.9.3"
+  }
+}
