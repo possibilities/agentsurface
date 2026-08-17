@@ -101,8 +101,10 @@ and re-implements neither.
   installer. Its `launch` pane entrypoint runs `agentsurface launch` in a
   titled session-modal popup; AgentStart's keybinding passes the active pane's
   cwd when it opens the entrypoint. Its `pane.agent_detected` hook runs
-  `agentsurface name-tab`; `tab-namer.ts` polls the pane for its agent session,
-  claims the tab in the plugin's state directory (a `pending <pid>` state
+  `agentsurface name-tab`; `tab-namer.ts` first publishes the `$project`
+  sidebar token (the current workspace label, or the root repository name plus
+  its worktree branch), then polls the pane for its agent session, claims the tab
+  in the plugin's state directory (a `pending <pid>` state
   file, rewritten to `named` after the rename; a dead claimant's pending
   claim is taken over), and polls `conversation slug` while the transcript
   has no prompt — re-reading the pane's live session each round, so a

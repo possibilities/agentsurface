@@ -36,6 +36,9 @@ interface AgentDetectedEvent {
   released: boolean;
 }
 
+const SIDEBAR_METADATA_SOURCE = "agentsurface:sidebar";
+const WORKTREE_MARKER = "";
+
 export function parseAgentDetected(eventJson: string): AgentDetectedEvent | null {
   let parsed: unknown;
   try {
@@ -48,6 +51,70 @@ export function parseAgentDetected(eventJson: string): AgentDetectedEvent | null
   const paneId = (data as { pane_id?: unknown }).pane_id;
   if (typeof paneId !== "string" || paneId === "") return null;
   return { paneId, released: (data as { released?: unknown }).released === true };
+}
+
+/** Publish the label consumed by Herdr's configurable Agent sidebar. Linked
+ * worktrees use the root repository name plus their branch; ordinary
+ * workspaces preserve Herdr's current workspace label. */
+export async function reportSidebarProjectToken(call: HerdrCall, paneId: string): Promise<void> {
+  const paneResult = (await invoke(call, ["pane", "get", paneId])) as {
+    pane?: { workspace_id?: unknown };
+  } | null;
+  const workspaceId = paneResult?.pane?.workspace_id;
+  if (typeof workspaceId !== "string" || workspaceId === "") {
+    throw new HerdrError("herdr's pane response named no workspace");
+  }
+
+  const workspaceResult = (await invoke(call, ["workspace", "get", workspaceId])) as {
+    workspace?: {
+      label?: unknown;
+      worktree?: {
+        checkout_path?: unknown;
+        is_linked_worktree?: unknown;
+        repo_name?: unknown;
+        repo_root?: unknown;
+      } | null;
+    };
+  } | null;
+  const workspace = workspaceResult?.workspace;
+  const label = workspace?.label;
+  if (typeof label !== "string" || label === "") {
+    throw new HerdrError("herdr's workspace response named no label");
+  }
+  const worktree = workspace?.worktree;
+  let project = label;
+  if (
+    worktree?.is_linked_worktree === true &&
+    typeof worktree.repo_name === "string" &&
+    typeof worktree.repo_root === "string" &&
+    typeof worktree.checkout_path === "string"
+  ) {
+    project = worktree.repo_name;
+    const listResult = (await invoke(call, ["worktree", "list", "--cwd", worktree.repo_root])) as {
+      worktrees?: unknown;
+    } | null;
+    const entry = Array.isArray(listResult?.worktrees)
+      ? listResult.worktrees.find(
+          (candidate) => (candidate as { path?: unknown }).path === worktree.checkout_path,
+        )
+      : undefined;
+    const branch = (entry as { branch?: unknown } | undefined)?.branch;
+    const displayBranch =
+      typeof branch === "string" && branch !== "" ? branch.replace(/^worktree\//, "") : "detached";
+    project = `${project} ${WORKTREE_MARKER} ${displayBranch}`;
+  }
+
+  const reportArgs = [
+    "pane",
+    "report-metadata",
+    paneId,
+    "--source",
+    SIDEBAR_METADATA_SOURCE,
+    "--token",
+    `project=${project}`,
+  ];
+  reportArgs.push("--clear-token", "worktree");
+  await invoke(call, reportArgs);
 }
 
 export interface PaneSession {
@@ -275,8 +342,17 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
     console.error("name-tab runs as a herdr plugin event hook; herdr provides its environment");
     return 2;
   }
+  const call = createHerdrCall(env);
+  const event = parseAgentDetected(eventJson);
+  if (event !== null && !event.released) {
+    try {
+      await reportSidebarProjectToken(call, event.paneId);
+    } catch (error) {
+      console.error(`name-tab: sidebar project token failed: ${(error as Error).message}`);
+    }
+  }
   return runTabNamer({
-    call: createHerdrCall(env),
+    call,
     stateDir,
     eventJson,
     slug: createSlugAttempt(env, home),

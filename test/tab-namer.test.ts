@@ -3,7 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HerdrCall } from "../src/herdr.ts";
-import { parseAgentDetected, runTabNamer, type SlugOutcome } from "../src/tab-namer.ts";
+import {
+  parseAgentDetected,
+  reportSidebarProjectToken,
+  runTabNamer,
+  type SlugOutcome,
+} from "../src/tab-namer.ts";
 
 let roots: string[] = [];
 
@@ -94,6 +99,95 @@ describe("parseAgentDetected", () => {
     expect(parseAgentDetected(EVENT)).toEqual({ paneId: "pane_1", released: false });
     expect(parseAgentDetected("not json")).toBeNull();
     expect(parseAgentDetected(JSON.stringify({ data: {} }))).toBeNull();
+  });
+});
+
+describe("reportSidebarProjectToken", () => {
+  test("marks a linked worktree with its root repository name", async () => {
+    const calls: string[][] = [];
+    const call: HerdrCall = async (args) => {
+      calls.push(args);
+      if (args[0] === "pane" && args[1] === "get") {
+        return { result: { pane: { workspace_id: "ws_1" } } };
+      }
+      if (args[0] === "workspace" && args[1] === "get") {
+        return {
+          result: {
+            workspace: {
+              label: "worktree-clear-valley-003a",
+              worktree: {
+                checkout_path: "/worktrees/clear-valley",
+                is_linked_worktree: true,
+                repo_name: "agentvoice",
+                repo_root: "/code/agentvoice",
+              },
+            },
+          },
+        };
+      }
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          result: {
+            worktrees: [
+              { branch: "main", path: "/code/agentvoice" },
+              { branch: "worktree/clear-valley-003a", path: "/worktrees/clear-valley" },
+            ],
+          },
+        };
+      }
+      if (args[0] === "pane" && args[1] === "report-metadata") return { result: {} };
+      throw new Error(`unexpected herdr call: ${args.join(" ")}`);
+    };
+
+    await reportSidebarProjectToken(call, "pane_1");
+
+    expect(calls[3]).toEqual([
+      "pane",
+      "report-metadata",
+      "pane_1",
+      "--source",
+      "agentsurface:sidebar",
+      "--token",
+      "project=agentvoice  clear-valley-003a",
+      "--clear-token",
+      "worktree",
+    ]);
+  });
+
+  test("preserves the workspace label outside a linked worktree", async () => {
+    const calls: string[][] = [];
+    const call: HerdrCall = async (args) => {
+      calls.push(args);
+      if (args[0] === "pane" && args[1] === "get") {
+        return { result: { pane: { workspace_id: "ws_1" } } };
+      }
+      if (args[0] === "workspace" && args[1] === "get") {
+        return {
+          result: {
+            workspace: {
+              label: "hand-renamed",
+              worktree: { is_linked_worktree: false, repo_name: "repo" },
+            },
+          },
+        };
+      }
+      if (args[0] === "pane" && args[1] === "report-metadata") return { result: {} };
+      throw new Error(`unexpected herdr call: ${args.join(" ")}`);
+    };
+
+    await reportSidebarProjectToken(call, "pane_1");
+
+    expect(calls[2]).toEqual([
+      "pane",
+      "report-metadata",
+      "pane_1",
+      "--source",
+      "agentsurface:sidebar",
+      "--token",
+      "project=hand-renamed",
+      "--clear-token",
+      "worktree",
+    ]);
   });
 });
 

@@ -5,7 +5,7 @@ id = "agentsurface"
 name = "AgentSurface"
 version = "0.2.0"
 min_herdr_version = "0.8.0"
-description = "Launch agents and name tabs from their conversations"
+description = "Launch agents, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
 
 # The launch surface is a session-modal popup over the active pane. Its caller
@@ -18,10 +18,10 @@ width = "80%"
 height = "80%"
 command = ["agentsurface", "launch"]
 
-# When herdr detects an agent in a pane, name the pane's tab after the
-# agent's conversation — once. The command polls herdr for the agent's
-# session identity and the transcript for its first prompt, then renames
-# the tab with `conversation slug`.
+# When herdr detects an agent in a pane, publish its sidebar project token,
+# then name the pane's tab after the agent's conversation — once. The command
+# polls herdr for the agent's session identity and the transcript for its first
+# prompt, then renames the tab with `conversation slug`.
 [[events]]
 on = "pane.agent_detected"
 command = ["agentsurface", "name-tab"]
