@@ -140,10 +140,10 @@ describe("executeLaunch", () => {
     ]);
     const starts = calls.filter((args) => args[0] === "agent" && args[1] === "start");
     expect(starts).toHaveLength(2);
-    expect(starts[1]).toEqual([
-      "agent",
-      "start",
-      "claude-3",
+    expect(starts[0]?.[2]).toMatch(/^a-[0-9a-f]{10}$/);
+    expect(starts[1]?.[2]).toMatch(/^a-[0-9a-f]{10}$/);
+    expect(starts[1]?.[2]).not.toBe(starts[0]?.[2]);
+    expect(starts[1]?.slice(3)).toEqual([
       "--kind",
       "claude",
       "--pane",
@@ -154,7 +154,7 @@ describe("executeLaunch", () => {
       "fix it",
     ]);
     const record = JSON.parse(readFileSync(path, "utf8").trim());
-    expect(record.agent).toBe("claude-3");
+    expect(record.agent).toBe(starts[1]?.[2]);
     expect(record.workspace).toBe("w9");
   });
 
@@ -185,7 +185,7 @@ describe("executeLaunch", () => {
     expect(calls[2]).toEqual(["workspace", "focus", "w7"]);
     const record = JSON.parse(readFileSync(path, "utf8").trim());
     expect(record.workspace).toBe("w7");
-    expect(record.agent).toBe("claude-1");
+    expect(record.agent).toMatch(/^a-[0-9a-f]{10}$/);
   });
 
   test("a worktree launch is branchless; herdr's chosen name lands in the record", async () => {

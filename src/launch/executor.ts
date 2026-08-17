@@ -101,9 +101,9 @@ export function primedPrompt(plan: Pick<DetachedLaunch, "harness" | "prompt" | "
   return `${sigil}${plan.priming}${plan.prompt === "" ? "" : ` ${plan.prompt}`}`;
 }
 
-/** Two launches fired in quick succession can race to the same `<kind>-<n>`
- * before either agent registers; `agent_name_taken` re-derives against the
- * fresh list, excluding names this launch already tried. */
+/** Two launches can still race on an opaque alias before either agent
+ * registers; `agent_name_taken` re-derives against the fresh list, excluding
+ * names this launch already tried. */
 export async function executeLaunch(
   call: HerdrCall,
   logPath: string,
@@ -138,7 +138,7 @@ export async function executeLaunch(
   const tried = new Set<string>();
   let name = "";
   for (let attempt = 0; ; attempt++) {
-    name = nextAgentName(plan.harness, new Set([...(await liveAgentNames(call)), ...tried]));
+    name = nextAgentName(new Set([...(await liveAgentNames(call)), ...tried]));
     tried.add(name);
     try {
       await startAgentWhenReady(call, {

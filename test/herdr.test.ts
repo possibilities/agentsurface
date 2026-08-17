@@ -138,10 +138,9 @@ describe("invoke", () => {
 });
 
 describe("agent naming", () => {
-  test("numbers per kind and takes the first free slot", () => {
-    expect(nextAgentName("claude", new Set())).toBe("claude-1");
-    expect(nextAgentName("claude", new Set(["claude-1", "claude-2", "codex-1"]))).toBe("claude-3");
-    expect(nextAgentName("claude", new Set(["claude-2"]))).toBe("claude-1");
+  test("uses an opaque Herdr-safe alias and skips live collisions", () => {
+    const uuids = ["11111111-1111-4111-8111-111111111111", "abcdef12-3456-4789-8abc-def123456789"];
+    expect(nextAgentName(new Set(["a-1111111111"]), () => uuids.shift()!)).toBe("a-abcdef1234");
   });
 
   test("reads live names, tolerating unnamed agents", async () => {

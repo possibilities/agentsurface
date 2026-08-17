@@ -213,12 +213,20 @@ export async function liveAgentNames(call: HerdrCall): Promise<Set<string>> {
   return names;
 }
 
-/** Agent names are unique among live agents: number per kind and take the
- * first free slot, the fleet's existing naming idiom. */
-export function nextAgentName(kind: string, taken: ReadonlySet<string>): string {
-  let index = 1;
-  while (taken.has(`${kind}-${index}`)) index += 1;
-  return `${kind}-${index}`;
+/** Herdr requires a unique name before it starts an agent. Keep that launch
+ * alias deliberately opaque: `a-` satisfies the leading-letter grammar and
+ * ten random hex characters provide a compact, non-semantic live target. */
+export function nextAgentName(
+  taken: ReadonlySet<string>,
+  randomUuid: () => string = () => crypto.randomUUID(),
+): string {
+  for (let attempt = 0; attempt < 16; attempt++) {
+    const token = randomUuid().replaceAll("-", "").toLowerCase().slice(0, 10);
+    if (!/^[0-9a-f]{10}$/.test(token)) continue;
+    const candidate = `a-${token}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  throw new HerdrError("could not allocate a unique opaque agent name");
 }
 
 /** A freshly created pane is not an available shell until its startup files
