@@ -35,11 +35,15 @@ and re-implements neither.
   from the world: the project from the focused pane's cwd, the cascade from
   the last launch where the catalog still allows it.
 - `launch/app.ts` is the thin OpenTUI shell over the model. The intent
-  field is OpenTUI's Textarea, driven by ONE manual dispatch — never
-  `focus()` it, or the renderer adds its own routing and every key lands
-  twice; `showCursor` alone carries the focus visual. `launch/theme.ts`
-  holds the Signal Room tokens; `launch/overlay.ts` is the palette
-  anatomy, generalized one notch into the four choosers.
+  field is OpenTUI's Textarea; `syncIntent` is the ONE place that ever
+  calls `focus()`/`blur()` on it, strictly following `state.focus` — a
+  second focus path means the renderer routes every key twice. The body
+  is one renderable per form row so rows are pointer targets: a press
+  runs the row's primary action (chooser, toggle, intent focus), the
+  wheel cycles the value, and a press outside an open overlay dismisses
+  it. `launch/theme.ts` holds the Signal Room tokens;
+  `launch/overlay.ts` is the palette anatomy, generalized one notch into
+  the five choosers.
 - `launch/executor.ts` is the detached half: submitting must close the
   popup at once, and a popup closes only with its process — so the TUI
   spawns `agentsurface execute-launch <plan-json>` detached and exits (or,

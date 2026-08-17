@@ -197,7 +197,8 @@ function wrap(index: number, delta: number, length: number): number {
   return (index + delta + length) % length;
 }
 
-function cycleValue(state: FormState, delta: number): void {
+/** Cycle the focused row's value — the arrows' and the wheel's shared verb. */
+export function cycleValue(state: FormState, delta: number): void {
   switch (state.focus) {
     case "project":
       state.projectIndex = wrap(state.projectIndex, delta, state.projects.length);
@@ -264,10 +265,97 @@ export function setProject(state: FormState, index: number): void {
   if (index >= 0 && index < state.projects.length) state.projectIndex = index;
 }
 
+/** First-letter jump: on a select row, a letter naming any option's first
+ * letter moves to the next such option after the current one, cycling on
+ * repeat. Projects answer by their basename — every display shares the
+ * root prefix. A match shadows the global hotkeys on that row; a miss
+ * falls through to them. The worktree row is a toggle, not a jump. */
+function jumpToOption(state: FormState, letter: string): boolean {
+  const options = ((): { labels: string[]; index: number; set: (at: number) => void } | null => {
+    switch (state.focus) {
+      case "project":
+        return {
+          labels: state.projects.map((project) =>
+            project.display.slice(project.display.lastIndexOf("/") + 1),
+          ),
+          index: state.projectIndex,
+          set: (at) => setProject(state, at),
+        };
+      case "harness":
+        return {
+          labels: state.harnesses.map((harness) => harness.harness),
+          index: state.harnessIndex,
+          set: (at) => setHarness(state, at),
+        };
+      case "model":
+        return {
+          labels: currentHarness(state).models.map((model) => model.model),
+          index: state.modelIndex,
+          set: (at) => setModel(state, at),
+        };
+      case "effort":
+        return {
+          labels: [...currentModel(state).efforts],
+          index: state.effortIndex,
+          set: (at) => setEffort(state, at),
+        };
+      case "priming":
+        return {
+          labels: state.primingOptions,
+          index: state.primingIndex,
+          set: (at) => setPriming(state, at),
+        };
+      default:
+        return null;
+    }
+  })();
+  if (options === null) return false;
+  const lower = letter.toLowerCase();
+  const matches = options.labels
+    .map((label, at) => ({ label, at }))
+    .filter((one) => one.label.toLowerCase().startsWith(lower));
+  if (matches.length === 0) return false;
+  const next = matches.find((one) => one.at > options.index) ?? matches[0]!;
+  options.set(next.at);
+  return true;
+}
+
 /** The editor's answer replaces the intent wholesale; a trailing newline is
  * the editor's punctuation, not the operator's. */
 export function normalizeEditedIntent(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+}
+
+/** A pointer press on a row is its primary action: select rows focus and
+ * ask for their chooser, the worktree toggles, the intent takes focus, and
+ * the failed phase accepts any press as its ⏎ BACK. Null is a press on
+ * padding or canvas. The shell dismisses an open overlay before asking. */
+export function handleRowPress(state: FormState, field: Field | null): FormAction {
+  if (state.phase.kind === "failed") {
+    state.phase = { kind: "form" };
+    return { kind: "none" };
+  }
+  if (field === null) return { kind: "none" };
+  state.notice = null;
+  if (field === "prompt") {
+    state.focus = "prompt";
+    return { kind: "none" };
+  }
+  if (field === "worktree") {
+    state.focus = "worktree";
+    toggleWorktree(state);
+    return { kind: "none" };
+  }
+  state.focus = field;
+  return { kind: "choose", field };
+}
+
+/** A wheel gesture over a row focuses it and cycles its value — the
+ * arrows' verb at the pointer. */
+export function handleRowScroll(state: FormState, field: Field | null, delta: number): void {
+  if (state.phase.kind !== "form" || field === null || field === "prompt") return;
+  state.focus = field;
+  cycleValue(state, delta);
 }
 
 export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
@@ -332,6 +420,15 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
     return { kind: "choose", field: state.focus };
   }
   const letter = key.sequence !== undefined && key.sequence.length === 1 ? key.sequence : name;
+  if (
+    letter.length === 1 &&
+    letter > " " &&
+    key.ctrl !== true &&
+    key.meta !== true &&
+    jumpToOption(state, letter)
+  ) {
+    return { kind: "none" };
+  }
   switch (letter.toLowerCase()) {
     case "p":
       return { kind: "choose", field: "project" };
@@ -445,59 +542,75 @@ function selectValue(
   ];
 }
 
-/** The whole screen: intent block, fact rows, and the in-body status region.
- * No identity, no help line, no pinned chrome — the form is the instrument. */
+/** One rendered row, tagged with the field a pointer press on it acts for;
+ * null rows are separators and the status region. */
+export interface FormRow {
+  field: Field | null;
+  spans: Line;
+}
+
 /** The fact rows and the in-body status region. The intent block above them
- * is the shell's textarea, not a line here. */
-export function buildFormLines(state: FormState, width: number): Line[] {
-  const lines: Line[] = [];
+ * is the shell's textarea, not a row here. No identity, no help line, no
+ * pinned chrome — the form is the instrument. */
+export function buildFormLines(state: FormState, width: number): FormRow[] {
+  const rows: FormRow[] = [];
 
   const project = state.projects[state.projectIndex];
   const projectValue: Span[] =
     project === undefined
       ? [span("no projects found", "danger")]
       : [...selectValue(state, "project", fit(project.display, width - LABEL_WIDTH - 10))];
-  lines.push(fieldRow(state, "project", "project", projectValue));
+  rows.push({ field: "project", spans: fieldRow(state, "project", "project", projectValue) });
 
-  lines.push(
-    fieldRow(state, "worktree", "worktree", [
+  rows.push({
+    field: "worktree",
+    spans: fieldRow(state, "worktree", "worktree", [
       state.worktree
         ? span(`${GLYPHS.live} new worktree`, "ok")
         : span(`${GLYPHS.idle} no worktree`, "muted"),
     ]),
-  );
-  lines.push([]);
+  });
+  rows.push({ field: null, spans: [] });
 
-  lines.push(
-    fieldRow(
+  rows.push({
+    field: "harness",
+    spans: fieldRow(
       state,
       "harness",
       "harness",
       selectValue(state, "harness", currentHarness(state).harness),
     ),
-  );
-  lines.push(
-    fieldRow(state, "model", "model", selectValue(state, "model", currentModel(state).model)),
-  );
-  lines.push(
-    fieldRow(state, "effort", "effort", selectValue(state, "effort", currentEffort(state))),
-  );
+  });
+  rows.push({
+    field: "model",
+    spans: fieldRow(
+      state,
+      "model",
+      "model",
+      selectValue(state, "model", currentModel(state).model),
+    ),
+  });
+  rows.push({
+    field: "effort",
+    spans: fieldRow(state, "effort", "effort", selectValue(state, "effort", currentEffort(state))),
+  });
   const priming = currentPriming(state);
-  lines.push(
-    fieldRow(
+  rows.push({
+    field: "priming",
+    spans: fieldRow(
       state,
       "priming",
       "priming",
       selectValue(state, "priming", priming, priming === PRIMING_NONE ? "muted" : "text"),
     ),
-  );
+  });
 
   const status = statusLines(state, width);
   if (status.length > 0) {
-    lines.push([]);
-    lines.push(...status);
+    rows.push({ field: null, spans: [] });
+    rows.push(...status.map((spans): FormRow => ({ field: null, spans })));
   }
-  return lines;
+  return rows;
 }
 
 function statusLines(state: FormState, width: number): Line[] {

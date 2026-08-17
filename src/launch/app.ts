@@ -28,8 +28,12 @@ import {
   currentHarness,
   currentModel,
   currentPriming,
+  type Field,
+  type FormRow,
   failRun,
   handleFormKey,
+  handleRowPress,
+  handleRowScroll,
   normalizeEditedIntent,
   resetForAnother,
   setEffort,
@@ -130,15 +134,27 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     paddingLeft: 2,
     paddingRight: 2,
     backgroundColor: SIGNAL_ROOM.canvas,
+    // The catch-all for presses on padding and empty canvas: dismisses an
+    // open overlay, backs out of the failed phase, otherwise nothing.
+    onMouseUp: (event) => {
+      event.stopPropagation();
+      rowPress(null);
+    },
   });
   // The intent block: an amber input rail beside OpenTUI's own textarea —
-  // a real line editor (word motions, kills, selection, undo, paste).
+  // a real line editor (word motions, kills, selection, undo, paste). The
+  // textarea handles no press itself, so a press anywhere on the row
+  // bubbles here and focuses the prompt.
   const promptRow = new core.BoxRenderable(renderer, {
     id: "launch-intent-row",
     width: "100%",
     flexDirection: "row",
     flexShrink: 0,
     backgroundColor: SIGNAL_ROOM.canvas,
+    onMouseUp: (event) => {
+      event.stopPropagation();
+      rowPress("prompt");
+    },
   });
   const rail = new core.TextRenderable(renderer, {
     id: "launch-intent-rail",
@@ -169,7 +185,15 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   promptRow.add(rail);
   promptRow.add(intent);
   frame.add(promptRow);
-  const body = new core.TextRenderable(renderer, { id: "launch-body", marginTop: 1 });
+  // The form body is a column of per-row renderables rather than one text
+  // blob, so every row is a pointer target the renderer can hit-test.
+  const body = new core.BoxRenderable(renderer, {
+    id: "launch-body",
+    marginTop: 1,
+    width: "100%",
+    flexDirection: "column",
+    backgroundColor: SIGNAL_ROOM.canvas,
+  });
   frame.add(body);
   root.add(frame);
 
@@ -209,18 +233,96 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   renderer.root.add(commands.root);
   for (const overlay of Object.values(choosers)) renderer.root.add(overlay.root);
 
-  const linesToStyled = (lines: readonly Line[]): InstanceType<typeof core.StyledText> => {
+  const lineToStyled = (line: Line): InstanceType<typeof core.StyledText> => {
     const chunks: ReturnType<typeof core.bold>[] = [];
-    for (const line of lines) {
-      for (const part of line) {
-        if (part.text.length === 0) continue;
-        let chunk = core.fg(SIGNAL_ROOM[part.token])(part.text);
-        if (part.bold === true) chunk = core.bold(chunk);
-        chunks.push(chunk);
-      }
-      chunks.push(core.fg(SIGNAL_ROOM.text)("\n"));
+    for (const part of line) {
+      if (part.text.length === 0) continue;
+      let chunk = core.fg(SIGNAL_ROOM[part.token])(part.text);
+      if (part.bold === true) chunk = core.bold(chunk);
+      chunks.push(chunk);
     }
+    if (chunks.length === 0) chunks.push(core.fg(SIGNAL_ROOM.canvas)(" "));
     return new core.StyledText(chunks);
+  };
+
+  /** Any overlay above the form makes the form an outside surface: a press
+   * there dismisses and stops. Reports whether it dismissed anything. */
+  const dismissOverlays = (): boolean => {
+    let dismissed = false;
+    if (commands.isOpen()) {
+      commands.close();
+      dismissed = true;
+    }
+    for (const overlay of Object.values(choosers)) {
+      if (overlay.isOpen()) {
+        overlay.close();
+        dismissed = true;
+      }
+    }
+    return dismissed;
+  };
+
+  const overlayAbove = (): boolean =>
+    commands.isOpen() || Object.values(choosers).some((overlay) => overlay.isOpen());
+
+  // The pointer's press and wheel verbs are the model's (handleRowPress,
+  // handleRowScroll); the shell only owns what needs a terminal — overlay
+  // dismissal, the editor suspension, and the repaint.
+  const rowPress = (field: Field | null): void => {
+    if (editing) return;
+    if (dismissOverlays()) {
+      paint();
+      return;
+    }
+    const action = handleRowPress(state, field);
+    if (action.kind === "choose") {
+      openChooser(action.field);
+      return;
+    }
+    paint();
+  };
+
+  const rowScroll = (field: Field | null, direction: "up" | "down"): void => {
+    if (editing || overlayAbove()) return;
+    handleRowScroll(state, field, direction === "down" ? 1 : -1);
+    paint();
+  };
+
+  // Rebuilt only when the rows actually change (the overlay's signature
+  // idiom), so the 500ms repaint tick never churns renderables.
+  let bodySignature = "";
+  const paintBody = (formRows: readonly FormRow[]): void => {
+    const nextSignature = JSON.stringify(formRows);
+    if (nextSignature === bodySignature) return;
+    bodySignature = nextSignature;
+    for (const child of body.getChildren()) {
+      body.remove(child.id);
+      child.destroyRecursively();
+    }
+    formRows.forEach((row, index) => {
+      const rowBox = new core.BoxRenderable(renderer, {
+        id: `launch-row-${index}`,
+        height: 1,
+        width: "100%",
+        flexDirection: "row",
+        backgroundColor: SIGNAL_ROOM.canvas,
+        onMouseUp: (event) => {
+          event.stopPropagation();
+          rowPress(row.field);
+        },
+        onMouseScroll: (event) => {
+          const direction = event.scroll?.direction;
+          if (direction !== "up" && direction !== "down") return;
+          event.stopPropagation();
+          event.preventDefault();
+          rowScroll(row.field, direction);
+        },
+      });
+      rowBox.add(
+        new core.TextRenderable(renderer, { content: lineToStyled(row.spans), height: 1 }),
+      );
+      body.add(rowBox);
+    });
   };
 
   let interval: ReturnType<typeof setInterval> | null = null;
@@ -384,7 +486,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     const rows = renderer.height || process.stdout.rows || 24;
     const width = Math.max(36, columns - 4);
     syncIntent();
-    body.content = linesToStyled(buildFormLines(state, width));
+    paintBody(buildFormLines(state, width));
     commands.update({ width: columns, height: rows, items: commandItems() });
     for (const field of ["project", "harness", "model", "effort", "priming"] as const) {
       choosers[field].update({ width: columns, height: rows, items: chooserItems(field) });

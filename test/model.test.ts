@@ -10,6 +10,8 @@ import {
   type FormState,
   failRun,
   handleFormKey,
+  handleRowPress,
+  handleRowScroll,
   type KeyEvent,
   normalizeEditedIntent,
   resetForAnother,
@@ -158,7 +160,8 @@ describe("direct keys", () => {
       kind: "choose",
       field: "project",
     });
-    state.focus = "effort";
+    // On the project row no project starts with these letters, so the
+    // hotkeys keep their global meaning under the first-letter jump.
     expect(handleFormKey(state, key("p"))).toEqual({ kind: "choose", field: "project" });
     expect(handleFormKey(state, key("h"))).toEqual({ kind: "choose", field: "harness" });
     expect(handleFormKey(state, key("m"))).toEqual({ kind: "choose", field: "model" });
@@ -200,6 +203,99 @@ describe("direct keys", () => {
     state.focus = "prompt";
     handleFormKey(state, key("w"));
     expect(state.worktree).toBe(true);
+  });
+});
+
+describe("first-letter jump", () => {
+  test("a letter jumps the focused row to the option it names", () => {
+    const state = form();
+    state.focus = "effort";
+    handleFormKey(state, key("h"));
+    expect(currentEffort(state)).toBe("high");
+    handleFormKey(state, key("l"));
+    expect(currentEffort(state)).toBe("low");
+  });
+
+  test("an ambiguous letter cycles its matches on repeat", () => {
+    const state = form(); // efforts low/medium/high/xhigh/max, medium current
+    state.focus = "effort";
+    handleFormKey(state, key("m"));
+    expect(currentEffort(state)).toBe("max");
+    handleFormKey(state, key("m"));
+    expect(currentEffort(state)).toBe("medium");
+  });
+
+  test("a match shadows the row's hotkeys; a miss falls through to them", () => {
+    const state = form();
+    state.focus = "effort";
+    // m names medium/max here, so it never opens the model chooser…
+    expect(handleFormKey(state, key("m")).kind).toBe("none");
+    // …while p names no effort and stays the project hotkey.
+    expect(handleFormKey(state, key("p"))).toEqual({ kind: "choose", field: "project" });
+  });
+
+  test("projects jump by basename, and a harness jump snaps the cascade", () => {
+    const state = form();
+    state.focus = "project";
+    handleFormKey(state, key("b"));
+    expect(state.projects[state.projectIndex]?.display).toBe("~/code/beta");
+    // a names alpha here, shadowing launch-another on this row.
+    handleFormKey(state, key("a"));
+    expect(state.projects[state.projectIndex]?.display).toBe("~/code/alpha");
+    state.focus = "harness";
+    handleFormKey(state, key("c"));
+    expect(currentHarness(state).harness).toBe("codex");
+    expect(currentModel(state).model).toBe("sol");
+    handleFormKey(state, key("c"));
+    expect(currentHarness(state).harness).toBe("claude");
+  });
+
+  test("never fires from the prompt or the worktree toggle", () => {
+    const state = form();
+    state.focus = "worktree";
+    handleFormKey(state, key("n"));
+    expect(state.worktree).toBe(false);
+    state.focus = "prompt";
+    handleFormKey(state, key("l"));
+    expect(state.focus).toBe("prompt");
+  });
+});
+
+describe("pointer", () => {
+  test("a press focuses a select row and asks for its chooser", () => {
+    const state = form();
+    expect(handleRowPress(state, "effort")).toEqual({ kind: "choose", field: "effort" });
+    expect(state.focus).toBe("effort");
+  });
+
+  test("a press toggles the worktree and focuses the intent", () => {
+    const state = form();
+    expect(handleRowPress(state, "worktree").kind).toBe("none");
+    expect(state.worktree).toBe(true);
+    expect(state.focus).toBe("worktree");
+    expect(handleRowPress(state, "prompt").kind).toBe("none");
+    expect(state.focus).toBe("prompt");
+  });
+
+  test("any press backs out of the failed phase; padding does nothing else", () => {
+    const state = form();
+    failRun(state, "boom");
+    expect(handleRowPress(state, "effort").kind).toBe("none");
+    expect(state.phase.kind).toBe("form");
+    expect(state.focus).toBe("prompt"); // the press was the back action, not a choose
+    expect(handleRowPress(state, null).kind).toBe("none");
+    expect(state.focus).toBe("prompt");
+  });
+
+  test("a wheel gesture focuses the row and cycles its value", () => {
+    const state = form();
+    handleRowScroll(state, "effort", 1);
+    expect(state.focus).toBe("effort");
+    expect(currentEffort(state)).toBe("high");
+    handleRowScroll(state, "effort", -1);
+    expect(currentEffort(state)).toBe("medium");
+    handleRowScroll(state, "prompt", 1);
+    expect(state.focus).toBe("effort");
   });
 });
 

@@ -27,7 +27,7 @@ function form(): FormState {
 }
 
 function rows(state: FormState, width: number): string[] {
-  return buildFormLines(state, width).map((line) => line.map((span) => span.text).join(""));
+  return buildFormLines(state, width).map((row) => row.spans.map((span) => span.text).join(""));
 }
 
 describe("buildFormLines", () => {
@@ -87,5 +87,23 @@ describe("buildFormLines", () => {
     const state = form();
     state.prompt = "words that must not appear in the fact rows";
     expect(rows(state, 76).join("\n")).not.toContain("words that must not appear");
+  });
+
+  test("tags each field row for the pointer; separators and status are null", () => {
+    const state = form();
+    expect(buildFormLines(state, 76).map((row) => row.field)).toEqual([
+      "project",
+      "worktree",
+      null,
+      "harness",
+      "model",
+      "effort",
+      "priming",
+    ]);
+    failRun(state, "boom");
+    const tail = buildFormLines(state, 76)
+      .map((row) => row.field)
+      .slice(7);
+    expect(tail).toEqual([null, null, null]);
   });
 });
