@@ -99,10 +99,12 @@ and re-implements neither.
   means the default roots (`~/code`, `~/src`).
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
   installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
-  entrypoint runs `agentsurface launch` in a titled session-modal popup;
+  entrypoint runs `agentsurface launch` in a session-modal popup;
   AgentStart's keybinding passes the active pane's cwd when it opens the
   entrypoint. Its `usage` pane entrypoint runs `agentusage` through the
-  escape-to-close wrapper in a popup titled `Subscription usage`. Its
+  escape-to-close wrapper. Popup titles follow one convention — the
+  title-cased name of the CLI the TUI fronts: `Agent Launch`, `Agent
+  Usage`. Its
   `pane.agent_detected` and `pane.agent_status_changed` hooks both run
   `agentsurface name-tab`; `tab-namer.ts` publishes the `$project` sidebar
   token on detection only (the current workspace label, or the root

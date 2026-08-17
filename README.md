@@ -63,7 +63,8 @@ command palette. Esc quits without launching; ctrl+c is always the
 terminal interrupt.
 
 The bundled herdr plugin declares the launcher as a popup pane titled
-`Launch an agent`. AgentStart links the plugin and opens that entrypoint from
+`Agent Launch` — popup titles are by convention the title-cased name of the
+CLI the TUI fronts. AgentStart links the plugin and opens that entrypoint from
 the keybinding, passing the active pane's cwd so the form starts on the project
 it opened over:
 
@@ -77,7 +78,7 @@ description = "launch an agent"
 
 The plugin is also the shared home for fleet TUIs bound to popups. Its `usage`
 entrypoint runs `agentusage` through the escape-to-close wrapper in an 80%
-popup titled `Subscription usage`; AgentStart binds `prefix+u` to that
+popup titled `Agent Usage`; AgentStart binds `prefix+u` to that
 entrypoint instead of duplicating the title and geometry in the keybinding.
 
 ## Conversation slug

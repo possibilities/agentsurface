@@ -3,16 +3,20 @@
 # the source-linked fleet installs on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.4.0"
+version = "0.4.1"
 min_herdr_version = "0.8.0"
 description = "Launch agents, show subscription usage, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
 
+# Popup titles follow one convention: the title-cased name of the CLI the TUI
+# is a frontend for — the launch form fronts agentlaunch, the usage dialog
+# fronts agentusage. A new pane entrypoint takes its CLI's name the same way.
+#
 # The launch surface is a session-modal popup over the active pane. Its caller
 # passes the active pane's cwd so the form preselects the project it opened over.
 [[panes]]
 id = "launch"
-title = "Launch an agent"
+title = "Agent Launch"
 placement = "popup"
 width = "80%"
 height = "80%"
@@ -22,7 +26,7 @@ command = ["agentsurface", "launch"]
 # the usage dialog's established escape-to-close behavior.
 [[panes]]
 id = "usage"
-title = "Subscription usage"
+title = "Agent Usage"
 placement = "popup"
 width = "80%"
 height = "80%"
