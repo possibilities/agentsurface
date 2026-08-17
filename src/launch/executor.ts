@@ -58,8 +58,18 @@ export function parseDetachedLaunch(json: string): DetachedLaunch {
 }
 
 /** The child's stderr appends to a log beside the launch records: a crash
- * before the executor's own failure handling must still leave evidence. */
-export function spawnDetachedLaunch(env: Environ, logPath: string, plan: DetachedLaunch): void {
+ * before the executor's own failure handling must still leave evidence.
+ *
+ * `detached` is load-bearing, not hygiene: the launcher usually lives in a
+ * herdr popup whose terminal closes the moment the TUI exits, and the pty
+ * teardown SIGHUPs the foreground process group — which silently killed
+ * same-group children before they could create anything. A separate group
+ * survives the popup. */
+export function spawnDetachedLaunch(
+  env: Environ,
+  logPath: string,
+  plan: DetachedLaunch,
+): ReturnType<typeof Bun.spawn> {
   let stderr: number | "ignore" = "ignore";
   try {
     mkdirSync(dirname(logPath), { recursive: true });
@@ -73,11 +83,13 @@ export function spawnDetachedLaunch(env: Environ, logPath: string, plan: Detache
       stdin: "ignore",
       stdout: "ignore",
       stderr,
+      detached: true,
       env: env as Record<string, string>,
     },
   );
   proc.unref();
   if (typeof stderr === "number") closeSync(stderr);
+  return proc;
 }
 
 /** A priming rides the intent as each harness's own skill spelling: /name

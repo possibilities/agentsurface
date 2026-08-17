@@ -307,8 +307,13 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   };
 
   const commandItems = () => [
-    { id: "launch", key: "⏎", label: "launch", onRun: () => submitLaunch(true) },
-    { id: "another", key: "A", label: "launch, then another", onRun: () => submitLaunch(false) },
+    { id: "launch", key: "⏎", label: "launch", onRun: () => void submitLaunch(true) },
+    {
+      id: "another",
+      key: "A",
+      label: "launch, then another",
+      onRun: () => void submitLaunch(false),
+    },
     { id: "project", key: "P", label: "choose project", onRun: () => openChooser("project") },
     { id: "harness", key: "H", label: "choose harness", onRun: () => openChooser("harness") },
     { id: "model", key: "M", label: "choose model", onRun: () => openChooser("model") },
@@ -456,7 +461,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
 
   /** Freeze the plan and hand it to the detached executor; the popup owes
    * the operator an immediate close (or, unfocused, the next blank form). */
-  const submitLaunch = (focus: boolean): void => {
+  const submitLaunch = async (focus: boolean): Promise<void> => {
     if (state.phase.kind !== "form") return;
     state.prompt = intent.plainText;
     const plan = buildPlan(state);
@@ -465,12 +470,26 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       return;
     }
     // The submitted plan is persisted before the spawn, and the draft
-    // clears only after it: the intent is recoverable at every instant.
+    // clears only once the child is confirmed alive: the intent is
+    // recoverable at every instant, whatever dies.
     appendSubmitted(submittedLogPath(env, home), { ...plan, focus });
+    let child: ReturnType<typeof spawnDetachedLaunch>;
     try {
-      spawnDetachedLaunch(env, logPath, { ...plan, focus });
+      child = spawnDetachedLaunch(env, logPath, { ...plan, focus });
     } catch (error) {
       failRun(state, error instanceof Error ? error.message : String(error));
+      paint();
+      return;
+    }
+    // A beat of patience before the popup closes: a child that dies at
+    // birth (a broken tree, a bad spawn) fails HERE, visibly, with the
+    // draft intact — never a silently closed popup with nothing launched.
+    const early = await Promise.race([
+      child.exited,
+      Bun.sleep(300).then(() => null as number | null),
+    ]);
+    if (early !== null && early !== 0) {
+      failRun(state, `launch handoff died at start (exit ${early}) · see executor.log`);
       paint();
       return;
     }
@@ -555,10 +574,10 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
         openChooser(action.field);
         return;
       case "launch":
-        submitLaunch(true);
+        void submitLaunch(true);
         return;
       case "launchAnother":
-        submitLaunch(false);
+        void submitLaunch(false);
         return;
       case "editIntent":
         void editIntent();
