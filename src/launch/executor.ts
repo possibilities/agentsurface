@@ -109,13 +109,44 @@ export function primedPrompt(plan: Pick<DetachedLaunch, "harness" | "prompt" | "
   return `${sigil}${plan.priming}${plan.prompt === "" ? "" : ` ${plan.prompt}`}`;
 }
 
+/** A launch that never reached a running harness. It carries the spool file
+ * holding the typed intent, because a failure notification the operator can
+ * act on has to name where the prompt went — recovering one otherwise means
+ * reading the state directory by hand. */
+export class LaunchFailure extends Error {
+  readonly intentPath: string | null;
+
+  constructor(message: string, intentPath: string | null) {
+    super(message);
+    this.intentPath = intentPath;
+  }
+}
+
 /** Two launches can still race on an opaque alias before either agent
  * registers; `agent_name_taken` re-derives against the fresh list, excluding
- * names this launch already tried. */
+ * names this launch already tried.
+ *
+ * A failure here is a failure to *start*: herdr's post-spawn confirmation
+ * outcomes come back as an unnamed-but-started launch instead, recorded and
+ * silent. */
 export async function executeLaunch(
   call: HerdrCall,
   logPath: string,
   plan: DetachedLaunch,
+): Promise<void> {
+  const intent: { path: string | null } = { path: null };
+  try {
+    await startLaunch(call, logPath, plan, intent);
+  } catch (error) {
+    throw new LaunchFailure(error instanceof Error ? error.message : String(error), intent.path);
+  }
+}
+
+async function startLaunch(
+  call: HerdrCall,
+  logPath: string,
+  plan: DetachedLaunch,
+  intent: { path: string | null },
 ): Promise<void> {
   let surface: Awaited<ReturnType<typeof createWorkspace>>;
   if (plan.worktree) {
@@ -144,15 +175,17 @@ export async function executeLaunch(
   const primed = primedPrompt(plan);
   const agentArgs = ["--x-level", plan.level];
   if (primed !== "") {
-    agentArgs.push("--x-prompt-file", writeIntentFile(dirname(logPath), primed));
+    intent.path = writeIntentFile(dirname(logPath), primed);
+    agentArgs.push("--x-prompt-file", intent.path);
   }
   const tried = new Set<string>();
   let name = "";
+  let outcome: Awaited<ReturnType<typeof startAgentWhenReady>>;
   for (let attempt = 0; ; attempt++) {
     name = nextAgentName(new Set([...(await liveAgentNames(call)), ...tried]));
     tried.add(name);
     try {
-      await startAgentWhenReady(call, {
+      outcome = await startAgentWhenReady(call, {
         name,
         kind: plan.harness,
         paneId: surface.paneId,
@@ -176,6 +209,7 @@ export async function executeLaunch(
     branch: surface.branch,
     workspace: surface.workspaceId,
     agent: name,
+    named: outcome.named,
     priming: plan.priming,
   });
 }
@@ -234,6 +268,12 @@ export async function findProjectWorkspace(
   const label = basename(projectPath);
   const byLabel = (await listWorkspaces(call)).find((workspace) => workspace.label === label);
   return byLabel?.workspaceId ?? null;
+}
+
+/** The failure as the operator should read it: what went wrong, and where the
+ * prompt is still sitting when one was spooled. */
+export function launchFailureBody(message: string, intentPath: string | null): string {
+  return intentPath === null ? message : `${message}\n\nPrompt: ${intentPath}`;
 }
 
 /** Best-effort: the executor has no terminal, so the surface itself carries

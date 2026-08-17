@@ -26,6 +26,10 @@ export interface LaunchRecord {
   branch: string | null;
   workspace: string;
   agent: string;
+  /** Whether herdr kept the launch alias as a live target. A started harness
+   * whose name herdr released during startup is a recorded launch all the
+   * same — the record is bookkeeping, and the agent is running. */
+  named: boolean;
   priming: string | null;
 }
 

@@ -175,7 +175,7 @@ describe("startAgentWhenReady", () => {
       agentArgs: ["--x-level", "fable:max", "fix the bug"],
       pollMs: 1,
     });
-    expect(outcome).toEqual({ ready: true });
+    expect(outcome).toEqual({ started: true, named: true, unconfirmed: null });
     expect(calls.length).toBe(3);
     expect(calls[0]).toEqual([
       "agent",
@@ -185,6 +185,8 @@ describe("startAgentWhenReady", () => {
       "claude",
       "--pane",
       "w9:p1",
+      "--timeout",
+      "120000",
       "--",
       "--x-level",
       "fable:max",
@@ -203,7 +205,24 @@ describe("startAgentWhenReady", () => {
       agentArgs: [],
       pollMs: 1,
     });
-    expect(outcome).toEqual({ ready: false });
+    expect(outcome).toEqual({ started: true, named: true, unconfirmed: "agent_not_ready" });
+  });
+
+  test("an unconfirmed name is a started launch: the intent rides the argv", async () => {
+    // Both codes come from herdr's post-spawn confirmation wait, so the
+    // harness is running with the prompt whichever one comes back. Treating
+    // them as failures reported one for every claude launch.
+    for (const code of ["timeout", "agent_name_not_found"]) {
+      const { call } = fake([{ error: { code, message: "not confirmed" } }]);
+      const outcome = await startAgentWhenReady(call, {
+        name: "a-0123456789",
+        kind: "claude",
+        paneId: "w9:p1",
+        agentArgs: [],
+        pollMs: 1,
+      });
+      expect(outcome).toEqual({ started: true, named: false, unconfirmed: code });
+    }
   });
 
   test("any other error is immediate; endless busy times out", async () => {

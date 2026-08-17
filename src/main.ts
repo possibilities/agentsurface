@@ -9,7 +9,13 @@ import { CliError, UsageError } from "./errors.ts";
 import { TOP_HELP, VERSION } from "./help.ts";
 import { createHerdrCall, HerdrError } from "./herdr.ts";
 import { runLaunch } from "./launch/app.ts";
-import { executeLaunch, notifyLaunchFailure, parseDetachedLaunch } from "./launch/executor.ts";
+import {
+  executeLaunch,
+  LaunchFailure,
+  launchFailureBody,
+  notifyLaunchFailure,
+  parseDetachedLaunch,
+} from "./launch/executor.ts";
 import { launchLogPath } from "./state.ts";
 import { nameTabFromEnvironment } from "./tab-namer.ts";
 
@@ -202,8 +208,10 @@ async function main(argv: string[]): Promise<number> {
         return 2;
       }
       const message = error instanceof Error ? error.message : String(error);
+      const intentPath = error instanceof LaunchFailure ? error.intentPath : null;
       console.error(`error: ${message}`);
-      await notifyLaunchFailure(process.env, message);
+      if (intentPath !== null) console.error(`prompt: ${intentPath}`);
+      await notifyLaunchFailure(process.env, launchFailureBody(message, intentPath));
       return 1;
     }
   }

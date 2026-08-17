@@ -16,6 +16,8 @@ import {
   type DetachedLaunch,
   executeLaunch,
   findProjectWorkspace,
+  LaunchFailure,
+  launchFailureBody,
   parseDetachedLaunch,
   primedPrompt,
   writeIntentFile,
@@ -173,17 +175,15 @@ describe("executeLaunch", () => {
     expect(starts[0]?.[2]).toMatch(/^a-[0-9a-f]{10}$/);
     expect(starts[1]?.[2]).toMatch(/^a-[0-9a-f]{10}$/);
     expect(starts[1]?.[2]).not.toBe(starts[0]?.[2]);
-    expect(starts[1]?.slice(3, 9)).toEqual([
-      "--kind",
-      "claude",
-      "--pane",
-      "w9:p1",
-      "--",
+    const start = starts[1] ?? [];
+    expect(start.slice(3, 7)).toEqual(["--kind", "claude", "--pane", "w9:p1"]);
+    expect(start.slice(start.indexOf("--") + 1)).toEqual([
       "--x-level",
+      "fable:max",
+      "--x-prompt-file",
+      start[start.length - 1] ?? "",
     ]);
-    expect(starts[1]?.[9]).toBe("fable:max");
-    expect(starts[1]?.[10]).toBe("--x-prompt-file");
-    const intentPath = starts[1]?.[11] ?? "";
+    const intentPath = start[start.length - 1] ?? "";
     expect(intentPath.startsWith(join(dirname(path), "intents"))).toBe(true);
     expect(readFileSync(intentPath, "utf8")).toBe("fix it");
     const record = JSON.parse(readFileSync(path, "utf8").trim());
@@ -274,5 +274,46 @@ describe("executeLaunch", () => {
     expect(calls[0]).toEqual(["worktree", "create", "--cwd", "/code/alpha", "--no-focus"]);
     const record = JSON.parse(readFileSync(path, "utf8").trim());
     expect(record.branch).toBe("worktree/calm-cloud-0009");
+  });
+
+  test("an unconfirmed name records the launch instead of failing it", async () => {
+    const { call } = fake([
+      { result: { panes: [] } },
+      { result: { workspaces: [] } },
+      CREATED,
+      { result: { agents: [] } },
+      { error: { code: "timeout", message: "timed out waiting for agent startup" } },
+    ]);
+    const path = logPath();
+    await executeLaunch(call, path, PLAN);
+
+    const record = JSON.parse(readFileSync(path, "utf8").trim());
+    expect(record.named).toBe(false);
+    expect(record.agent).toMatch(/^a-[0-9a-f]{10}$/);
+  });
+
+  test("a real failure names the spool file holding the prompt", async () => {
+    const { call } = fake([
+      { result: { panes: [] } },
+      { result: { workspaces: [] } },
+      CREATED,
+      { result: { agents: [] } },
+      { error: { code: "agent_start_failed", message: "exited before becoming interactive" } },
+    ]);
+    const path = logPath();
+    let caught: unknown;
+    try {
+      await executeLaunch(call, path, PLAN);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(LaunchFailure);
+    const failure = caught as LaunchFailure;
+    expect(failure.message).toBe("exited before becoming interactive");
+    expect(readFileSync(failure.intentPath ?? "", "utf8")).toBe("fix it");
+    expect(launchFailureBody(failure.message, failure.intentPath)).toContain(
+      failure.intentPath ?? "",
+    );
+    expect(existsSync(path)).toBe(false);
   });
 });

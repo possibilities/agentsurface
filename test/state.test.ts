@@ -35,6 +35,7 @@ const RECORD = {
   branch: null,
   workspace: "w9",
   agent: "claude-1",
+  named: true,
   priming: null,
 };
 

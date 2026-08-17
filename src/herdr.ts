@@ -335,14 +335,50 @@ export function nextAgentName(
   throw new HerdrError("could not allocate a unique opaque agent name");
 }
 
+/** How long herdr may spend confirming the started agent before giving up on
+ * the name. Herdr's own default is 30s, which claude routinely overruns —
+ * plugins, skills, and MCP servers all boot before the harness is
+ * interactive. The executor is detached and has no screen to hold, so buy the
+ * generous wait: a confirmed name is worth more than a fast answer. Herdr
+ * caps the value at 300s. */
+const AGENT_START_CONFIRM_MS = 120_000;
+
+/** The outcomes of `agent start` that mean the harness is up even though
+ * herdr never confirmed the name. All three arrive from herdr's post-spawn
+ * confirmation wait — the server has already accepted the start and typed the
+ * launch into the pane by the time any of them can be returned:
+ *
+ * - `agent_not_ready` — present and named, but blocked on a startup dialog
+ *   (folder trust, first run) only the operator can answer.
+ * - `timeout` — the harness had not become interactive before herdr's
+ *   confirmation deadline.
+ * - `agent_name_not_found` — herdr released the name during startup, which it
+ *   does whenever screen detection flickers to none after first seeing the
+ *   agent.
+ *
+ * The intent rides the launch argv either way, so the harness submits it on
+ * its own schedule and nothing is lost. Treating these as failures is how
+ * every claude launch came to report one. */
+const UNCONFIRMED_START_CODES = new Set(["agent_not_ready", "timeout", "agent_name_not_found"]);
+
+/** What `agent start` settled on. `started` is false only when the harness
+ * never ran; `named` is false when it runs under a name herdr did not keep,
+ * which makes the launch alias useless as a live target but costs the launch
+ * nothing. */
+export interface AgentStartOutcome {
+  started: boolean;
+  named: boolean;
+  /** The confirmation-phase code, for the launch record's provenance. */
+  unconfirmed: string | null;
+}
+
 /** A freshly created pane is not an available shell until its startup files
  * finish; the server's own readiness check is the only authority, so retry
  * against agent_pane_busy rather than guessing from process state.
  *
- * `agent_not_ready` is a soft outcome, not a failure: the agent is present
- * and named, but blocked on a startup dialog (folder trust, first run) only
- * the operator can answer. The intent already rides the launch argv, so the
- * harness submits it once the dialog clears — nothing is lost. */
+ * Everything else divides into the two halves of herdr's `agent start`: the
+ * spawn, whose failures are real failures, and the confirmation wait, whose
+ * failures are not — see UNCONFIRMED_START_CODES. */
 export async function startAgentWhenReady(
   call: HerdrCall,
   options: {
@@ -352,10 +388,12 @@ export async function startAgentWhenReady(
     agentArgs: string[];
     timeoutMs?: number;
     pollMs?: number;
+    confirmMs?: number;
   },
-): Promise<{ ready: boolean }> {
+): Promise<AgentStartOutcome> {
   const timeoutMs = options.timeoutMs ?? 10_000;
   const pollMs = options.pollMs ?? 100;
+  const confirmMs = options.confirmMs ?? AGENT_START_CONFIRM_MS;
   const deadline = Date.now() + timeoutMs;
   const args = [
     "agent",
@@ -365,18 +403,22 @@ export async function startAgentWhenReady(
     options.kind,
     "--pane",
     options.paneId,
+    "--timeout",
+    String(confirmMs),
     ...(options.agentArgs.length > 0 ? ["--", ...options.agentArgs] : []),
   ];
   for (;;) {
     const response = await call(args);
     const error = response.error;
-    if (error === undefined || error === null) return { ready: true };
-    if (error.code === "agent_not_ready") return { ready: false };
-    if (error.code !== "agent_pane_busy" || Date.now() >= deadline) {
-      throw new HerdrError(
-        error.message ?? `agent start ${options.name} failed`,
-        error.code ?? null,
-      );
+    if (error === undefined || error === null) {
+      return { started: true, named: true, unconfirmed: null };
+    }
+    const code = error.code ?? null;
+    if (code !== null && UNCONFIRMED_START_CODES.has(code)) {
+      return { started: true, named: code === "agent_not_ready", unconfirmed: code };
+    }
+    if (code !== "agent_pane_busy" || Date.now() >= deadline) {
+      throw new HerdrError(error.message ?? `agent start ${options.name} failed`, code);
     }
     await Bun.sleep(pollMs);
   }

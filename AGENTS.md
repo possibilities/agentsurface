@@ -128,6 +128,12 @@ and re-implements neither.
   herdr's own typed-input path; this repository never writes to a pane.
   Delivery is not receipt: the confirmation carries the target's status so
   the sender knows a working harness queued the message.
+- A launch fails only when no harness ran. `herdr agent start` spawns and
+  then waits to confirm the launch alias; every outcome of that wait —
+  `agent_not_ready`, `timeout`, `agent_name_not_found` — is an unnamed but
+  started launch, recorded with `named: false` and reported to nobody. The
+  intent rides the argv, so the harness submits it on its own schedule. A
+  genuine failure's notification names the spool file holding the prompt.
 - A project already on the surface gets a tab in its workspace; a
   workspace is created only when none hosts the project (a pane working
   inside it, else its name as the label).
