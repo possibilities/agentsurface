@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as core from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
+import { intentKeyBindings } from "../src/launch/app.ts";
 
 /**
  * Pins the OpenTUI Textarea behavior the intent field relies on: plain
@@ -17,10 +18,7 @@ async function field() {
     minHeight: 1,
     height: 1,
     wrapMode: "word",
-    keyBindings: [
-      ...core.defaultTextareaKeyBindings,
-      { name: "return", shift: true, action: "newline" },
-    ],
+    keyBindings: intentKeyBindings(core.defaultTextareaKeyBindings),
   });
   setup.renderer.root.add(intent);
   intent.focus();
@@ -65,6 +63,38 @@ describe("the intent textarea", () => {
     expect(intent.plainText).toBe("one\ntwoP\nQ");
     intent.setText("reset");
     expect(intent.plainText).toBe("reset");
+    setup.renderer.destroy();
+  });
+
+  test("undo and redo ride the native history, every alias included", async () => {
+    const { setup, intent, press, type } = await field();
+    type("alpha beta");
+    const killAndRestore = (undoName: string): void => {
+      press("a", { ctrl: true });
+      press("k", { ctrl: true });
+      expect(intent.plainText).toBe("");
+      press(undoName, { ctrl: true });
+      expect(intent.plainText).toBe("alpha beta");
+    };
+    killAndRestore("-");
+    press(".", { ctrl: true });
+    expect(intent.plainText).toBe("");
+    press("-", { ctrl: true });
+    killAndRestore("_");
+    killAndRestore("/");
+    setup.renderer.destroy();
+  });
+
+  test("plain enter submits instead of inserting a newline", async () => {
+    const { setup, intent, press, type } = await field();
+    let submitted = 0;
+    intent.onSubmit = () => {
+      submitted += 1;
+    };
+    type("one");
+    press("return");
+    expect(intent.plainText).toBe("one");
+    expect(submitted).toBe(1);
     setup.renderer.destroy();
   });
 

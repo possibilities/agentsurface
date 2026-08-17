@@ -45,6 +45,37 @@ import { GLYPHS, type Line, SIGNAL_ROOM } from "./theme.ts";
  * can close at once. Everything decidable without a terminal lives in
  * model.ts.
  */
+interface IntentBinding {
+  name: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  meta?: boolean;
+  action: import("@opentui/core").TextareaAction;
+}
+
+/** The intent field's keymap: the widget's full default set (motions,
+ * kills, selection, native undo/redo on ctrl+- and ctrl+.) with plain
+ * enter submitting instead of inserting, explicit newline spellings, and
+ * the classic undo aliases — C-_ as the legacy 0x1F spelling, emacs C-/. */
+export function intentKeyBindings(defaults: readonly IntentBinding[]): IntentBinding[] {
+  return [
+    ...defaults.filter(
+      (binding) =>
+        !(
+          (binding.name === "return" || binding.name === "kpenter") &&
+          binding.shift !== true &&
+          binding.action === "newline"
+        ),
+    ),
+    { name: "return", action: "submit" },
+    { name: "kpenter", action: "submit" },
+    { name: "return", shift: true, action: "newline" },
+    { name: "j", ctrl: true, action: "newline" },
+    { name: "_", ctrl: true, action: "undo" },
+    { name: "/", ctrl: true, action: "undo" },
+  ];
+}
+
 export async function runLaunch(env: Environ, home: string): Promise<number> {
   // Everything fallible happens before the alternate screen, so a failure
   // prints plainly where the shell — or main's popup hold — can show it.
@@ -129,20 +160,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     // default map's legacy `linefeed`. The focused field keeps the FULL
     // readline set, ctrl+k kill-to-line-end included; the palette chord
     // applies from every other row.
-    keyBindings: [
-      ...core.defaultTextareaKeyBindings.filter(
-        (binding) =>
-          !(
-            (binding.name === "return" || binding.name === "kpenter") &&
-            binding.shift !== true &&
-            binding.action === "newline"
-          ),
-      ),
-      { name: "return", action: "submit" },
-      { name: "kpenter", action: "submit" },
-      { name: "return", shift: true, action: "newline" },
-      { name: "j", ctrl: true, action: "newline" },
-    ],
+    keyBindings: intentKeyBindings(core.defaultTextareaKeyBindings),
   });
   promptRow.add(rail);
   promptRow.add(intent);
