@@ -18,14 +18,18 @@ function sandbox(): string {
 }
 
 describe("scanProjects", () => {
-  test("finds directories one level deep, skipping files, dot names, and absent roots", () => {
+  test("offers the root itself, then its directories, skipping files, dot names, and absent roots", () => {
     const home = sandbox();
     mkdirSync(join(home, "code", "alpha"), { recursive: true });
     mkdirSync(join(home, "code", "beta"));
     mkdirSync(join(home, "code", ".hidden"));
     writeFileSync(join(home, "code", "notes.md"), "");
     const found = scanProjects(["~/code", "~/src"], home);
-    expect(found).toEqual([join(home, "code", "alpha"), join(home, "code", "beta")]);
+    expect(found).toEqual([
+      join(home, "code"),
+      join(home, "code", "alpha"),
+      join(home, "code", "beta"),
+    ]);
   });
 });
 

@@ -9,8 +9,10 @@ export interface ProjectChoice {
   count: number;
 }
 
-/** Scan each root one level deep. An absent root is a configuration written
- * for another machine, not a fault: it contributes nothing. */
+/** Scan each root one level deep, offering the root itself as a choice
+ * too — a launch can live at ~/code directly. An absent root is a
+ * configuration written for another machine, not a fault: it contributes
+ * nothing. */
 export function scanProjects(roots: readonly string[], home: string): string[] {
   const found: string[] = [];
   const seen = new Set<string>();
@@ -21,6 +23,10 @@ export function scanProjects(roots: readonly string[], home: string): string[] {
       entries = readdirSync(base, { withFileTypes: true });
     } catch {
       continue;
+    }
+    if (!seen.has(base)) {
+      seen.add(base);
+      found.push(base);
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : 1));
     for (const entry of entries) {

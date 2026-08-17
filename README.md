@@ -27,7 +27,8 @@ optional), then confirm the rest.
   other row. Escape always keeps your work: the whole form persists on
   every keystroke and an interrupted launcher reopens exactly where it
   stopped, while a submitted one starts fresh.
-- **Project** — directories one level under the configured roots, ordered by
+- **Project** — the configured roots themselves plus the directories one
+  level under them, ordered by
   how often you have launched into them (alphabetical until then), and
   preselected from the pane the launcher opened over. Space or `p` opens the
   filterable picker.
