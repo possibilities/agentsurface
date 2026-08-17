@@ -7,7 +7,9 @@ herdr workspace (or worktree), starts a balanced agent there through the
 fleet's launch policy, and submits the typed intent. The second is
 `conversation slug` — a short list-ready name for any conversation, derived
 from its first user prompt by the conversation's own harness at the
-catalog's metadata level.
+catalog's metadata level. The third is the message bus — `agents` and
+`message` — agents on the surface listing and messaging each other, with
+herdr delivering each message as typed input.
 
 The boundary is strict in both directions. Herdr owns every topology
 semantic: where worktrees go, what a workspace is, when a pane is an
@@ -25,7 +27,7 @@ and re-implements neither.
 ## Architecture
 
 - `main.ts` owns routing, exit semantics, and the popup-friendly failure
-  hold. Routes are `launch`, `conversation slug`, the internal
+  hold. Routes are `launch`, `conversation slug`, `agents`, `message`, the internal
   `execute-launch` and `name-tab`, `--help`, `--version`. The conversation
   route holds nothing on screen and exits 3 (no such transcript) or 4 (no
   user prompt yet) so machine callers can poll.
@@ -59,6 +61,17 @@ and re-implements neither.
   agentlaunch appends the file's text as the final native token, which is
   why a startup dialog still cannot drop it. The executor prunes the spool
   by age. JSON answers only; success on stdout, errors on stderr.
+- `bus.ts` is the message bus. An agent's name on the bus is the label of
+  the tab hosting its pane — the tab namer's slug, or a hand rename —
+  mutable and collidable, so the session id is the stable address.
+  `agents` joins herdr's `agent list` to `tab list` (the caller's
+  workspace by default, `--all` for the session); `message` resolves a
+  name (sender's workspace first, then the session) or a session id to
+  exactly one agent — a collision errors with candidates, never guesses —
+  and delivers through `herdr agent prompt`, behind a prefix naming the
+  sender (identity from the pane env herdr exports). The prompt response's
+  fresh status becomes the confirmation's delivery note: a working target
+  queued the message behind its turn; a blocked one rejected it.
 - `catalog.ts` consumes `agentlaunch x-catalog --x-json` — the resolved,
   validated pair space, plus each harness's designated metadata level. The
   TUI can never offer an invalid model:effort.
@@ -105,6 +118,10 @@ and re-implements neither.
   the bare harness command — which is the fleet shim into agentlaunch. No
   harness binary is ever resolved or spawned by this repository; slug
   inference spawns `agentlaunch`, which owns that resolution.
+- A bus message reaches its target only through `herdr agent prompt` —
+  herdr's own typed-input path; this repository never writes to a pane.
+  Delivery is not receipt: the confirmation carries the target's status so
+  the sender knows a working harness queued the message.
 - A project already on the surface gets a tab in its workspace; a
   workspace is created only when none hosts the project (a pane working
   inside it, else its name as the label).

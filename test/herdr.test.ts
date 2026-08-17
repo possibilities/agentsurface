@@ -144,8 +144,18 @@ describe("agent naming", () => {
   });
 
   test("reads live names, tolerating unnamed agents", async () => {
+    const placed = (pane: string, name?: string) => ({
+      name,
+      workspace_id: "w1",
+      tab_id: "t1",
+      pane_id: pane,
+    });
     const { call } = fake([
-      { result: { agents: [{ name: "claude-1" }, { pane_id: "w1:p1" }, { name: "codex-1" }] } },
+      {
+        result: {
+          agents: [placed("w1:p1", "claude-1"), placed("w1:p2"), placed("w1:p3", "codex-1")],
+        },
+      },
     ]);
     expect(await liveAgentNames(call)).toEqual(new Set(["claude-1", "codex-1"]));
   });

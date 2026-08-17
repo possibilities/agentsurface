@@ -46,6 +46,21 @@ in a list, derived from its first substantive user prompt by the
 conversation's own harness. _Avoid_: title, summary — the future longer
 form is a summary, not a slug.
 
+**Bus** — The message-bus integration: `message` sends text from one agent
+to another, and herdr delivers it as typed input (`agent prompt` — paste,
+then Enter) behind a prefix naming the sender. _Avoid_: chat, IPC,
+steering — herdr's word for the capability, not this integration's name.
+
+**Name** — An agent's addressable identity on the bus: the label of the
+tab hosting its pane, as the tab namer or a hand rename set it. Mutable
+and collidable — the session id is the stable address — and distinct from
+herdr's opaque launch alias. _Avoid_: alias, handle.
+
+**Message** — The text one agent sends another over the bus; it lands
+exactly like an operator's typed message, so a working harness queues it
+behind the running turn. Delivery is not receipt. Distinct from the
+intent, which rides a launch. _Avoid_: prompt.
+
 **Metadata level** — The catalog's designated cheap `model:effort` pair for
 metadata completions (slugs, and later summaries): declared per harness in
 agentlaunch's catalog, read from `x-catalog` as one `metadata_level` value,

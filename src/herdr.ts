@@ -201,16 +201,122 @@ export async function listPanes(call: HerdrCall): Promise<PaneSummary[]> {
   return summaries;
 }
 
-export async function liveAgentNames(call: HerdrCall): Promise<Set<string>> {
+/** One live agent from herdr's `agent list`: enough to address it (pane),
+ * place it (workspace, tab, cwd), and describe it (harness, status,
+ * session). `name` is herdr's own agent name — the opaque launch alias for
+ * agents this tool started — not the bus name, which is the tab's label. */
+export interface AgentListing {
+  name: string | null;
+  harness: string | null;
+  status: string;
+  sessionValue: string | null;
+  workspaceId: string;
+  tabId: string;
+  paneId: string;
+  cwd: string | null;
+}
+
+export async function listAgents(call: HerdrCall): Promise<AgentListing[]> {
   const result = (await invoke(call, ["agent", "list"])) as { agents?: unknown } | null;
-  const names = new Set<string>();
-  if (Array.isArray(result?.agents)) {
-    for (const agent of result.agents) {
-      const name = (agent as { name?: unknown }).name;
-      if (typeof name === "string") names.add(name);
+  if (!Array.isArray(result?.agents)) return [];
+  const listings: AgentListing[] = [];
+  for (const row of result.agents) {
+    const agent = row as {
+      name?: unknown;
+      agent?: unknown;
+      agent_status?: unknown;
+      agent_session?: { value?: unknown } | null;
+      workspace_id?: unknown;
+      tab_id?: unknown;
+      pane_id?: unknown;
+      cwd?: unknown;
+    };
+    const { workspace_id, tab_id, pane_id } = agent;
+    if (
+      typeof workspace_id !== "string" ||
+      typeof tab_id !== "string" ||
+      typeof pane_id !== "string"
+    ) {
+      continue;
     }
+    const sessionValue = agent.agent_session?.value;
+    listings.push({
+      name: typeof agent.name === "string" ? agent.name : null,
+      harness: typeof agent.agent === "string" ? agent.agent : null,
+      status: typeof agent.agent_status === "string" ? agent.agent_status : "unknown",
+      sessionValue: typeof sessionValue === "string" ? sessionValue : null,
+      workspaceId: workspace_id,
+      tabId: tab_id,
+      paneId: pane_id,
+      cwd: typeof agent.cwd === "string" ? agent.cwd : null,
+    });
+  }
+  return listings;
+}
+
+export async function liveAgentNames(call: HerdrCall): Promise<Set<string>> {
+  const names = new Set<string>();
+  for (const agent of await listAgents(call)) {
+    if (agent.name !== null) names.add(agent.name);
   }
   return names;
+}
+
+export interface TabSummary {
+  tabId: string;
+  workspaceId: string;
+  label: string | null;
+}
+
+export async function listTabs(call: HerdrCall): Promise<TabSummary[]> {
+  const result = (await invoke(call, ["tab", "list"])) as { tabs?: unknown } | null;
+  if (!Array.isArray(result?.tabs)) return [];
+  const summaries: TabSummary[] = [];
+  for (const row of result.tabs) {
+    const tabId = (row as { tab_id?: unknown }).tab_id;
+    const workspaceId = (row as { workspace_id?: unknown }).workspace_id;
+    const label = (row as { label?: unknown }).label;
+    if (typeof tabId === "string" && typeof workspaceId === "string") {
+      summaries.push({ tabId, workspaceId, label: typeof label === "string" ? label : null });
+    }
+  }
+  return summaries;
+}
+
+/** The pane's placement and reported agent session, for identifying the
+ * caller of a bus command: which tab holds it and which conversation it is. */
+export interface PaneContext {
+  tabId: string | null;
+  sessionValue: string | null;
+}
+
+export async function getPaneContext(call: HerdrCall, paneId: string): Promise<PaneContext> {
+  const result = (await invoke(call, ["pane", "get", paneId])) as {
+    pane?: { tab_id?: unknown; agent_session?: { value?: unknown } | null };
+  } | null;
+  const tabId = result?.pane?.tab_id;
+  const sessionValue = result?.pane?.agent_session?.value;
+  return {
+    tabId: typeof tabId === "string" ? tabId : null,
+    sessionValue: typeof sessionValue === "string" ? sessionValue : null,
+  };
+}
+
+/** Deliver text to a live agent as typed input: herdr pastes it into the
+ * agent's terminal and submits Enter. A working agent's harness queues it
+ * like any typed message; a blocked agent rejects with agent_blocked. The
+ * response carries the target's fresh status — the caller's evidence for
+ * whether the message was read at once or queued behind a running turn. */
+export async function promptAgent(
+  call: HerdrCall,
+  target: string,
+  text: string,
+): Promise<{ status: string }> {
+  const result = (await invoke(call, ["agent", "prompt", target, text])) as {
+    agent?: { agent_status?: unknown };
+  } | null;
+  const status = result?.agent?.agent_status;
+  return { status: typeof status === "string" ? status : "unknown" };
 }
 
 /** Herdr requires a unique name before it starts an agent. Keep that launch

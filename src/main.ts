@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { runAgents, runMessage } from "./bus.ts";
 import {
   conversationSlug,
   EXIT_NO_PROMPT,
@@ -97,6 +98,45 @@ async function main(argv: string[]): Promise<number> {
         if (error.recovery !== undefined) console.error(error.recovery);
         if (error.code === "transcript_not_found") return EXIT_TRANSCRIPT_NOT_FOUND;
         if (error.code === "transcript_no_prompt") return EXIT_NO_PROMPT;
+        return 1;
+      }
+      console.error(`error: ${(error as Error).message ?? String(error)}`);
+      return 1;
+    }
+  }
+  if (first === "agents" || first === "message") {
+    // Machine-invoked (agents call the bus from their panes), so failures
+    // report and exit — no popup hold.
+    try {
+      if (first === "agents") {
+        const rest = argv.slice(1);
+        const all = rest[0] === "--all";
+        if ((all ? rest.slice(1) : rest).length > 0) {
+          console.error("agents takes only --all");
+          console.error(TOP_HELP);
+          return 2;
+        }
+        const env = process.env;
+        console.log(await runAgents(createHerdrCall(env), env, env["HOME"] ?? "", all));
+        return 0;
+      }
+      const [, target, text] = argv;
+      if (target === undefined || text === undefined || text === "" || argv.length > 3) {
+        console.error('message takes a target and one text argument: message <target> "<text>"');
+        console.error(TOP_HELP);
+        return 2;
+      }
+      console.log(await runMessage(createHerdrCall(process.env), process.env, target, text));
+      return 0;
+    } catch (error) {
+      if (error instanceof CliError) {
+        console.error(`error: ${error.message}`);
+        if (error.recovery !== undefined) console.error(error.recovery);
+        return 1;
+      }
+      if (error instanceof HerdrError) {
+        console.error(`error: ${error.message}`);
+        console.error("is the herdr session running?");
         return 1;
       }
       console.error(`error: ${(error as Error).message ?? String(error)}`);

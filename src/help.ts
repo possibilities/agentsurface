@@ -5,6 +5,8 @@ export const TOP_HELP = `agentsurface — fleet integrations over the herdr surf
 Usage:
   agentsurface launch
   agentsurface conversation slug <harness> <session-id-or-path>
+  agentsurface agents [--all]
+  agentsurface message <target> "<text>"
   agentsurface --help | --version
 
 Commands:
@@ -17,6 +19,13 @@ Commands:
             its first user prompt by the conversation's own harness (claude,
             codex, or pi) at the catalog's metadata level. Exit 3: no such
             transcript; exit 4: transcript holds no user prompt yet.
+  agents    List the surface's live agents — name (the tab's label), session
+            id, harness, status, cwd. Agents in the caller's workspace by
+            default; --all lists the whole session.
+  message   Send text to another agent over the message bus. The target is a
+            name or a session id; herdr types the message into the target's
+            harness like an operator message, behind a prefix naming the
+            sender. A working target queues it; a blocked target rejects it.
 
 Keys in the launcher:
   ctrl+k opens the command palette; every action lives there.
