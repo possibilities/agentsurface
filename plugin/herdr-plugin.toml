@@ -1,11 +1,11 @@
-# AgentSurface's herdr plugin: launcher UI and event-driven fleet behavior on
-# the surface. Linked by agentstart's installer (`herdr plugin link`); the
-# commands run `agentsurface`, the source-linked fleet install on PATH.
+# AgentSurface's herdr plugin: fleet TUI panes and event-driven behavior on the
+# surface. Linked by agentstart's installer (`herdr plugin link`); commands run
+# the source-linked fleet installs on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.2.0"
+version = "0.3.0"
 min_herdr_version = "0.8.0"
-description = "Launch agents, label projects, and name conversation tabs"
+description = "Launch agents, show subscription usage, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
 
 # The launch surface is a session-modal popup over the active pane. Its caller
@@ -17,6 +17,16 @@ placement = "popup"
 width = "80%"
 height = "80%"
 command = ["agentsurface", "launch"]
+
+# Popup-bound fleet TUIs live together in this plugin. The wrapper preserves
+# the usage dialog's established escape-to-close behavior.
+[[panes]]
+id = "usage"
+title = "Subscription usage"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["escape-to-quit", "agentusage"]
 
 # When herdr detects an agent in a pane, publish its sidebar project token,
 # then name the pane's tab after the agent's conversation — once. The command

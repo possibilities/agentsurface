@@ -98,10 +98,13 @@ and re-implements neither.
 - `config*.ts` strictly load `~/.config/agentsurface/config.json`; absence
   means the default roots (`~/code`, `~/src`).
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
-  installer. Its `launch` pane entrypoint runs `agentsurface launch` in a
-  titled session-modal popup; AgentStart's keybinding passes the active pane's
-  cwd when it opens the entrypoint. Its `pane.agent_detected` hook runs
-  `agentsurface name-tab`; `tab-namer.ts` first publishes the `$project`
+  installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
+  entrypoint runs `agentsurface launch` in a titled session-modal popup;
+  AgentStart's keybinding passes the active pane's cwd when it opens the
+  entrypoint. Its `usage` pane entrypoint runs `agentusage` through the
+  escape-to-close wrapper in a popup titled `Subscription usage`. Its
+  `pane.agent_detected` hook runs `agentsurface name-tab`; `tab-namer.ts`
+  first publishes the `$project`
   sidebar token (the current workspace label, or the root repository name plus
   its worktree branch), then polls the pane for its agent session, claims the tab
   in the plugin's state directory (a `pending <pid>` state

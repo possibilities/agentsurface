@@ -74,6 +74,11 @@ command = '"$HERDR_BIN_PATH" plugin pane open --plugin agentsurface --entrypoint
 description = "launch an agent"
 ```
 
+The plugin is also the shared home for fleet TUIs bound to popups. Its `usage`
+entrypoint runs `agentusage` through the escape-to-close wrapper in an 80%
+popup titled `Subscription usage`; AgentStart binds `prefix+u` to that
+entrypoint instead of duplicating the title and geometry in the keybinding.
+
 ## Conversation slug
 
 ```sh
