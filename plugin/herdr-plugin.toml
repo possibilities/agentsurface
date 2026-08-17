@@ -1,12 +1,22 @@
-# AgentSurface's herdr plugin: fleet behavior that rides the surface's own
-# event hooks. Linked by agentstart's installer (`herdr plugin link`); the
+# AgentSurface's herdr plugin: launcher UI and event-driven fleet behavior on
+# the surface. Linked by agentstart's installer (`herdr plugin link`); the
 # commands run `agentsurface`, the source-linked fleet install on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.8.0"
-description = "Name each tab after its first conversation"
+description = "Launch agents and name tabs from their conversations"
 platforms = ["macos", "linux"]
+
+# The launch surface is a session-modal popup over the active pane. Its caller
+# passes the active pane's cwd so the form preselects the project it opened over.
+[[panes]]
+id = "launch"
+title = "Launch an agent"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["agentsurface", "launch"]
 
 # When herdr detects an agent in a pane, name the pane's tab after the
 # agent's conversation — once. The command polls herdr for the agent's

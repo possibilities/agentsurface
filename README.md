@@ -61,16 +61,17 @@ fire several launches from one popup. Every action lives in the ctrl+k
 command palette. Esc quits without launching; ctrl+c is always the
 terminal interrupt.
 
-The launcher is made to live on a herdr popup keybinding:
+The bundled herdr plugin declares the launcher as a popup pane titled
+`Launch an agent`. AgentStart links the plugin and opens that entrypoint from
+the keybinding, passing the active pane's cwd so the form starts on the project
+it opened over:
 
 ```toml
 [[keys.command]]
 key = "prefix+l"
-type = "popup"
-command = "agentsurface launch"
+type = "shell"
+command = '"$HERDR_BIN_PATH" plugin pane open --plugin agentsurface --entrypoint launch --cwd "${HERDR_ACTIVE_PANE_CWD:-$PWD}"'
 description = "launch an agent"
-width = "80%"
-height = "80%"
 ```
 
 ## Conversation slug
@@ -89,10 +90,33 @@ condenses it at the catalog's designated cheap metadata level. Exit `3`
 means no such transcript, `4` a transcript with no user prompt yet, so
 callers can poll a conversation that has not started.
 
-The repository also ships a herdr plugin (`plugin/`, linked by agentstart's
-installer) that puts the slug to work: when herdr detects an agent in a
-pane, the pane's tab is renamed after the agent's conversation — once per
-tab, quietly skipping anything that never produces a prompt.
+The repository ships that launcher entrypoint and the tab-naming hook in one
+herdr plugin (`plugin/`, linked by agentstart's installer). When herdr detects
+an agent in a pane, the hook renames its tab after the agent's conversation —
+once per tab, quietly skipping anything that never produces a prompt.
+
+## Message bus
+
+Agents on the surface can message each other:
+
+```sh
+agentsurface agents            # live agents in your workspace
+agentsurface agents --all      # the whole session, with workspaces
+agentsurface message fix-the-tests "how far along is the migration?"
+```
+
+An agent's name on the bus is its tab's label — the slug the tab namer set.
+`message` takes a name or a session id; a name is resolved in the sender's
+workspace first, then across the session, and a collision is reported with
+the candidates' session ids instead of guessed at. Herdr delivers the text
+as typed input (paste, then Enter) behind a prefix naming the sender, so
+the receiving harness treats it exactly like an operator message.
+
+Delivery is not receipt: the confirmation reports the target's status — a
+`working` agent queued the message behind its current turn; a `blocked`
+agent (stuck on an interactive dialog) rejects it, and the CLI says the
+message was not delivered. Both commands need to run from inside a herdr
+pane, where herdr's exported `HERDR_PANE_ID` identifies the sender.
 
 ## Install
 
