@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HerdrCall } from "../src/herdr.ts";
@@ -29,14 +29,35 @@ interface FakeSurface {
   paneReads: number;
 }
 
-function surface(session: unknown, options: { sessionAfterReads?: number } = {}): FakeSurface {
+/** `session` is the pane's agent_session, or a function of the 1-based
+ * read count when the occupant changes across reads. */
+function surface(
+  session: unknown,
+  options: {
+    sessionAfterReads?: number;
+    tabForRead?: (read: number) => string;
+    errorAfterReads?: number;
+  } = {},
+): FakeSurface {
   const fake: FakeSurface = { renames: [], paneReads: 0, call: undefined as never };
   fake.call = async (args) => {
     if (args[0] === "pane" && args[1] === "get") {
       fake.paneReads += 1;
+      if (options.errorAfterReads !== undefined && fake.paneReads > options.errorAfterReads) {
+        return { error: { code: "pane_not_found", message: "no such pane" } };
+      }
       const ready = fake.paneReads > (options.sessionAfterReads ?? 0);
+      const value =
+        typeof session === "function"
+          ? (session as (read: number) => unknown)(fake.paneReads)
+          : session;
       return {
-        result: { pane: { tab_id: "tab_1", agent_session: ready ? session : null } },
+        result: {
+          pane: {
+            tab_id: options.tabForRead?.(fake.paneReads) ?? "tab_1",
+            agent_session: ready ? value : null,
+          },
+        },
       };
     }
     if (args[0] === "tab" && args[1] === "rename") {
@@ -89,7 +110,7 @@ describe("runTabNamer", () => {
     expect(fake.paneReads).toBe(3);
     expect(asked).toEqual([["claude", "abc-123"]]);
     expect(fake.renames).toEqual([["tab_1", "fix-the-tests"]]);
-    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(true);
+    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
   });
 
   test("an already-claimed tab no-ops before inference", async () => {
@@ -172,5 +193,126 @@ describe("runTabNamer", () => {
       return { kind: "slug", value: "pi-work" };
     });
     expect(asked).toEqual([["pi", "/home/u/.pi/agent/sessions/x/y.jsonl"]]);
+  });
+
+  const CRASHED_SESSION = {
+    source: "herdr:claude",
+    agent: "claude",
+    kind: "id",
+    value: "dead-999",
+  };
+
+  test("a replaced agent mid-poll becomes the name source", async () => {
+    const fake = surface((read: number) => (read === 1 ? CRASHED_SESSION : CLAUDE_SESSION));
+    const dir = stateDir();
+    const asked: string[][] = [];
+    const code = await namer(fake, dir, async (harness, ref) => {
+      asked.push([harness, ref]);
+      return ref === "dead-999" ? { kind: "pending" } : { kind: "slug", value: "debug-escaping" };
+    });
+    expect(code).toBe(0);
+    expect(asked).toEqual([
+      ["claude", "dead-999"],
+      ["claude", "abc-123"],
+    ]);
+    expect(fake.renames).toEqual([["tab_1", "debug-escaping"]]);
+    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+  });
+
+  test("an adopted conversation gets a fresh prompt window", async () => {
+    let clock = 0;
+    const fake = surface((read: number) => (read <= 2 ? CRASHED_SESSION : CLAUDE_SESSION));
+    let liveAsks = 0;
+    const code = await namer(
+      fake,
+      stateDir(),
+      async (_harness, ref) => {
+        if (ref === "dead-999") return { kind: "pending" };
+        liveAsks += 1;
+        return liveAsks < 2 ? { kind: "pending" } : { kind: "slug", value: "late-adoption" };
+      },
+      {
+        now: () => clock,
+        promptTimeoutMs: 100,
+        sleep: async () => {
+          clock += 60;
+        },
+      },
+    );
+    // The dead ref burned the first window (clock 120 > 100); only the
+    // reset taken on adoption lets the live ref's second ask happen.
+    expect(code).toBe(0);
+    expect(fake.renames).toEqual([["tab_1", "late-adoption"]]);
+  });
+
+  test("an orphaned pending claim is taken over", async () => {
+    const fake = surface(CLAUDE_SESSION);
+    const dir = stateDir();
+    mkdirSync(join(dir, "named-tabs"), { recursive: true });
+    writeFileSync(join(dir, "named-tabs", "tab_1"), "pending 999999\n");
+    const code = await namer(fake, dir, async () => ({ kind: "slug", value: "rescued" }), {
+      pidAlive: () => false,
+    });
+    expect(code).toBe(0);
+    expect(fake.renames).toEqual([["tab_1", "rescued"]]);
+    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+  });
+
+  test("live pending, named, and legacy claims all no-op", async () => {
+    const never = async (): Promise<SlugOutcome> => {
+      throw new Error("should not infer");
+    };
+    for (const content of ["pending 4242\n", "named\n", "2026-08-17T03:34:41.794Z\n"]) {
+      const fake = surface(CLAUDE_SESSION);
+      const dir = stateDir();
+      mkdirSync(join(dir, "named-tabs"), { recursive: true });
+      writeFileSync(join(dir, "named-tabs", "tab_1"), content);
+      expect(await namer(fake, dir, never, { pidAlive: () => true })).toBe(0);
+      expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe(content);
+      expect(fake.renames).toHaveLength(0);
+    }
+  });
+
+  test("a superseded namer's failure leaves its successor's claim", async () => {
+    const fake = surface(CLAUDE_SESSION);
+    const dir = stateDir();
+    const claim = join(dir, "named-tabs", "tab_1");
+    const code = await namer(fake, dir, async () => {
+      // Another namer took the claim over while this one was polling.
+      writeFileSync(claim, "pending 777\n");
+      return { kind: "failed", message: "boom" };
+    });
+    expect(code).toBe(1);
+    expect(readFileSync(claim, "utf8")).toBe("pending 777\n");
+  });
+
+  test("an unsupported occupant mid-poll releases the claim", async () => {
+    const fake = surface((read: number) =>
+      read === 1 ? CLAUDE_SESSION : { source: "x", agent: "copilot", kind: "id", value: "z" },
+    );
+    const dir = stateDir();
+    const code = await namer(fake, dir, async () => ({ kind: "pending" }));
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(false);
+    expect(fake.renames).toHaveLength(0);
+  });
+
+  test("a pane that left the claimed tab releases the claim", async () => {
+    const fake = surface(CLAUDE_SESSION, {
+      tabForRead: (read) => (read === 1 ? "tab_1" : "tab_2"),
+    });
+    const dir = stateDir();
+    const code = await namer(fake, dir, async () => ({ kind: "pending" }));
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(false);
+    expect(fake.renames).toHaveLength(0);
+  });
+
+  test("a vanished pane mid-poll releases the claim", async () => {
+    const fake = surface(CLAUDE_SESSION, { errorAfterReads: 1 });
+    const dir = stateDir();
+    const code = await namer(fake, dir, async () => ({ kind: "pending" }));
+    expect(code).toBe(0);
+    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(false);
   });
 });

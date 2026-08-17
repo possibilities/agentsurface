@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HARNESS_NAMES, type HarnessName } from "./conversation/resolve.ts";
 import { conversationSlug } from "./conversation/slug.ts";
@@ -13,14 +13,22 @@ import type { Environ } from "./paths.ts";
  * pane is polled until its agent_session appears (herdr's integrations
  * report it moments after detection), then the transcript is polled until
  * it holds a first prompt (exit 4 from `conversation slug` underneath).
+ * While polling, the pane's session is re-read each round and the current
+ * ref is the one slugged: the name follows the tab's live conversation, so
+ * an agent that crashes and is replaced inside the window hands naming to
+ * its successor instead of orphaning the tab on a dead ref.
  *
- * "Named once" is a claim file per tab in the plugin's state directory,
- * taken with an exclusive create before inference so concurrent detections
- * and later agents in the same tab no-op. The claim is released when
- * naming fails, so the tab gets another chance on the next agent; it stays
- * with the tab's name on success. Every failure is quiet by design — a tab
- * keeping its default label is not worth a notification, and herdr's
- * plugin log already records the run.
+ * "Named once" is a claim file per tab in the plugin's state directory —
+ * `pending <pid>` while a namer polls, `named` once a rename has landed,
+ * and anything else (the legacy timestamp format, a hand-written marker)
+ * terminal. The exclusive create makes concurrent detections and later
+ * agents in the same tab no-op; a pending claim whose namer is dead was
+ * orphaned (killed mid-poll, a reboot) and is taken over, so a wedged
+ * claim cannot lock its tab out of naming forever. The claim is released
+ * when naming fails — only by its current owner — so the tab gets another
+ * chance on the next agent; it stays with the tab's name on success. Every
+ * failure is quiet by design — a tab keeping its default label is not
+ * worth a notification, and herdr's plugin log already records the run.
  */
 
 interface AgentDetectedEvent {
@@ -101,12 +109,66 @@ export function createSlugAttempt(
   };
 }
 
+type Claim = { state: "pending"; pid: number } | { state: "named" } | { state: "absent" };
+
+function readClaim(path: string): Claim {
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch {
+    return { state: "absent" };
+  }
+  const pending = /^pending (\d+)$/.exec(content.trim());
+  if (pending === null) return { state: "named" };
+  return { state: "pending", pid: Number(pending[1]) };
+}
+
+function acquireClaim(path: string, pid: number, pidAlive: (pid: number) => boolean): boolean {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      writeFileSync(path, `pending ${pid}\n`, { flag: "wx" });
+      return true;
+    } catch {
+      // Held or raced; the claim's state decides below.
+    }
+    const claim = readClaim(path);
+    if (claim.state === "named") return false;
+    if (claim.state === "pending" && pidAlive(claim.pid)) return false;
+    // Orphaned, or gone between create and read: clear and retry the
+    // exclusive create, so concurrent takeovers still elect one owner.
+    rmSync(path, { force: true });
+  }
+  return false;
+}
+
+/** Only the claim's current owner removes it: a taken-over namer's failure
+ * path must not release its successor's claim. */
+function releaseClaim(path: string, pid: number): void {
+  const claim = readClaim(path);
+  if (claim.state === "pending" && claim.pid === pid) rmSync(path, { force: true });
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM is a live process we may not signal; anything else is absence.
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 export interface TabNamerOptions {
   call: HerdrCall;
   stateDir: string;
   eventJson: string;
   slug: (harness: HarnessName, ref: string) => Promise<SlugOutcome>;
   sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+  /** The identity written into a pending claim; a claim whose owner is no
+   * longer alive may be taken over. */
+  pid?: number;
+  pidAlive?: (pid: number) => boolean;
   /** How long to wait for herdr to learn the pane's session. */
   sessionTimeoutMs?: number;
   sessionPollMs?: number;
@@ -117,6 +179,9 @@ export interface TabNamerOptions {
 
 export async function runTabNamer(options: TabNamerOptions): Promise<number> {
   const sleep = options.sleep ?? Bun.sleep;
+  const now = options.now ?? Date.now;
+  const pid = options.pid ?? process.pid;
+  const pidAlive = options.pidAlive ?? processAlive;
   const sessionTimeoutMs = options.sessionTimeoutMs ?? 90_000;
   const sessionPollMs = options.sessionPollMs ?? 1_000;
   const promptTimeoutMs = options.promptTimeoutMs ?? 600_000;
@@ -130,7 +195,7 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
   if (event.released) return 0;
 
   let session: PaneSession | null = null;
-  const sessionDeadline = Date.now() + sessionTimeoutMs;
+  const sessionDeadline = now() + sessionTimeoutMs;
   for (;;) {
     let read: PaneSession | "unsupported" | null;
     try {
@@ -144,42 +209,62 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
       session = read;
       break;
     }
-    if (Date.now() >= sessionDeadline) return 0;
+    if (now() >= sessionDeadline) return 0;
     await sleep(sessionPollMs);
   }
 
   const claimDir = join(options.stateDir, "named-tabs");
   const claim = join(claimDir, session.tabId);
   mkdirSync(claimDir, { recursive: true });
-  try {
-    writeFileSync(claim, `${new Date().toISOString()}\n`, { flag: "wx" });
-  } catch {
-    return 0;
-  }
+  if (!acquireClaim(claim, pid, pidAlive)) return 0;
 
-  const promptDeadline = Date.now() + promptTimeoutMs;
+  let promptDeadline = now() + promptTimeoutMs;
   for (;;) {
     const outcome = await options.slug(session.harness, session.ref);
     if (outcome.kind === "slug") {
       try {
         await invoke(options.call, ["tab", "rename", session.tabId, outcome.value]);
       } catch (error) {
-        rmSync(claim, { force: true });
+        releaseClaim(claim, pid);
         console.error(`name-tab: tab rename failed: ${(error as Error).message}`);
         return 1;
       }
+      writeFileSync(claim, "named\n");
       return 0;
     }
     if (outcome.kind === "failed") {
-      rmSync(claim, { force: true });
+      releaseClaim(claim, pid);
       console.error(`name-tab: ${outcome.message}`);
       return 1;
     }
-    if (Date.now() >= promptDeadline) {
-      rmSync(claim, { force: true });
+    if (now() >= promptDeadline) {
+      releaseClaim(claim, pid);
       return 0;
     }
     await sleep(promptPollMs);
+
+    let read: PaneSession | "unsupported" | null;
+    try {
+      read = await paneSession(options.call, event.paneId);
+    } catch (error) {
+      if (!(error instanceof HerdrError)) throw error;
+      releaseClaim(claim, pid);
+      return 0;
+    }
+    if (read === "unsupported" || (read !== null && read.tabId !== session.tabId)) {
+      // The occupant cannot be slugged, or the pane left the claimed tab;
+      // free the tab for a future agent's fresh chance.
+      releaseClaim(claim, pid);
+      return 0;
+    }
+    if (read !== null && (read.harness !== session.harness || read.ref !== session.ref)) {
+      // A replaced agent is the tab's conversation now; a new conversation
+      // gets a fresh prompt window.
+      session = read;
+      promptDeadline = now() + promptTimeoutMs;
+    }
+    // A null read keeps the last ref: a dead agent's successor shows up on
+    // a later poll.
   }
 }
 

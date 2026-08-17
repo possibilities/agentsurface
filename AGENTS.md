@@ -81,11 +81,17 @@ and re-implements neither.
 - `config*.ts` strictly load `~/.config/agentsurface/config.json`; absence
   means the default roots (`~/code`, `~/src`).
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
-  installer. Its `pane.agent_detected` hook runs `agentsurface name-tab`;
-  `tab-namer.ts` polls the pane for its agent session, claims the tab in
-  the plugin's state directory (exclusive create — named once), polls
-  `conversation slug` while the transcript has no prompt, and renames the
-  tab. Failures release the claim and reach only herdr's plugin log.
+  installer. Its `launch` pane entrypoint runs `agentsurface launch` in a
+  titled session-modal popup; AgentStart's keybinding passes the active pane's
+  cwd when it opens the entrypoint. Its `pane.agent_detected` hook runs
+  `agentsurface name-tab`; `tab-namer.ts` polls the pane for its agent session,
+  claims the tab in the plugin's state directory (a `pending <pid>` state
+  file, rewritten to `named` after the rename; a dead claimant's pending
+  claim is taken over), and polls `conversation slug` while the transcript
+  has no prompt — re-reading the pane's live session each round, so a
+  crashed agent's replacement becomes the name source — then renames the
+  tab. Failures release only a claim the namer still owns and reach only
+  herdr's plugin log.
 
 ## Invariants
 
