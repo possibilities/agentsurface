@@ -298,6 +298,11 @@ install_agentsurface() {
       # Recover if an earlier install replaced the snapshot but was
       # interrupted before atomically replacing its old valid receipt.
       validate_receipt
+    elif [[ "$MANAGED_KIND" == "source-link" ]]; then
+      # The legacy link tracked a live tree, so its receipt names whatever
+      # commit installed it — unrelatable to the current head. Shape-only
+      # corroboration is the honest check while upgrading it away.
+      validate_receipt
     else
       validate_receipt "$MANAGED_SHA"
     fi
