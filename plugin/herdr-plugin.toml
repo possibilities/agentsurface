@@ -3,7 +3,7 @@
 # the source-linked fleet installs on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.3.0"
+version = "0.4.0"
 min_herdr_version = "0.8.0"
 description = "Launch agents, show subscription usage, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
@@ -28,10 +28,19 @@ width = "80%"
 height = "80%"
 command = ["escape-to-quit", "agentusage"]
 
-# When herdr detects an agent in a pane, publish its sidebar project token,
-# then name the pane's tab after the agent's conversation — once. The command
-# polls herdr for the agent's session identity and the transcript for its first
-# prompt, then renames the tab with `conversation slug`.
+# When herdr detects an agent in a pane, publish its sidebar project token and
+# name the pane's tab after the agent's conversation — once. Each invocation is
+# one bounded attempt: it polls herdr briefly for the agent's session identity
+# and the transcript for its first prompt, then renames the tab with
+# `conversation slug`.
 [[events]]
 on = "pane.agent_detected"
+command = ["agentsurface", "name-tab"]
+
+# A status transition is the surface's own signal that a stalled start moved —
+# a trust dialog accepted, a first prompt typed, however long that took — so it
+# re-arms a naming attempt on the tabs the detection-time attempt could not
+# finish. A named tab's claim makes the frequent firings no-ops.
+[[events]]
+on = "pane.agent_status_changed"
 command = ["agentsurface", "name-tab"]

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HerdrCall } from "../src/herdr.ts";
 import {
-  parseAgentDetected,
+  parsePaneEvent,
   reportSidebarProjectToken,
   runTabNamer,
   type SlugOutcome,
@@ -26,6 +26,17 @@ function stateDir(): string {
 const EVENT = JSON.stringify({
   event: "pane.agent_detected",
   data: { type: "pane_agent_detected", pane_id: "pane_1", workspace_id: "ws_1", agent: "claude" },
+});
+
+const STATUS_EVENT = JSON.stringify({
+  event: "pane.agent_status_changed",
+  data: {
+    type: "pane_agent_status_changed",
+    pane_id: "pane_1",
+    workspace_id: "ws_1",
+    agent: "claude",
+    agent_status: "working",
+  },
 });
 
 interface FakeSurface {
@@ -94,11 +105,23 @@ function namer(
   });
 }
 
-describe("parseAgentDetected", () => {
-  test("reads the envelope's pane id and released flag", () => {
-    expect(parseAgentDetected(EVENT)).toEqual({ paneId: "pane_1", released: false });
-    expect(parseAgentDetected("not json")).toBeNull();
-    expect(parseAgentDetected(JSON.stringify({ data: {} }))).toBeNull();
+describe("parsePaneEvent", () => {
+  test("reads the envelope's kind, pane id, and released flag", () => {
+    expect(parsePaneEvent(EVENT)).toEqual({
+      kind: "agent_detected",
+      paneId: "pane_1",
+      released: false,
+    });
+    expect(parsePaneEvent(STATUS_EVENT)).toEqual({
+      kind: "status_changed",
+      paneId: "pane_1",
+      released: false,
+    });
+    expect(parsePaneEvent("not json")).toBeNull();
+    expect(parsePaneEvent(JSON.stringify({ data: {} }))).toBeNull();
+    expect(
+      parsePaneEvent(JSON.stringify({ data: { type: "pane_focused", pane_id: "pane_1" } })),
+    ).toBeNull();
   });
 });
 
@@ -204,6 +227,19 @@ describe("runTabNamer", () => {
     expect(fake.paneReads).toBe(3);
     expect(asked).toEqual([["claude", "abc-123"]]);
     expect(fake.renames).toEqual([["tab_1", "fix-the-tests"]]);
+    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+  });
+
+  test("a status transition re-arms a naming attempt", async () => {
+    // The detection-time attempt expired while a trust dialog held the
+    // harness; the status change its acceptance fires names the tab.
+    const fake = surface(CLAUDE_SESSION);
+    const dir = stateDir();
+    const code = await namer(fake, dir, async () => ({ kind: "slug", value: "after-the-dialog" }), {
+      eventJson: STATUS_EVENT,
+    });
+    expect(code).toBe(0);
+    expect(fake.renames).toEqual([["tab_1", "after-the-dialog"]]);
     expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
   });
 

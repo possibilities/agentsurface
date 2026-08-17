@@ -8,39 +8,48 @@ import type { Environ } from "./paths.ts";
 
 /**
  * The plugin's event half: herdr runs `agentsurface name-tab` on every
- * `pane.agent_detected`, and this names the pane's tab after the agent's
- * conversation — once. Herdr's event does not yet know the session, so the
- * pane is polled until its agent_session appears (moments after detection
- * when the harness starts clean, minutes later when a startup dialog — a
- * trust prompt, a login — holds it back), then the transcript is polled until
- * it holds a first prompt (exit 4 from `conversation slug` underneath).
- * While polling, the pane's session is re-read each round and the current
- * ref is the one slugged: the name follows the tab's live conversation, so
- * an agent that crashes and is replaced inside the window hands naming to
- * its successor instead of orphaning the tab on a dead ref.
+ * `pane.agent_detected` and `pane.agent_status_changed`, and this names the
+ * pane's tab after the agent's conversation — once. Each invocation is one
+ * bounded attempt: the pane is polled until its agent_session appears, then
+ * the transcript until it holds a first prompt (exit 4 from `conversation
+ * slug` underneath), with windows sized for machine lag — herdr reports the
+ * session moments after the harness starts, the harness flushes the prompt
+ * moments after submit. Human-scale gaps need no window at all: a harness
+ * held at a startup dialog (a trust prompt, a login) or an agent idling
+ * unprompted has no session or prompt to name, the attempt expires quietly,
+ * and the status transition that ends the wait — the dialog accepted, the
+ * first prompt typed, days later or not — fires the hook again. While
+ * polling, the pane's session is re-read each round and the current ref is
+ * the one slugged: the name follows the tab's live conversation, so an
+ * agent that crashes and is replaced inside the window hands naming to its
+ * successor instead of orphaning the tab on a dead ref.
  *
  * "Named once" is a claim file per tab in the plugin's state directory —
  * `pending <pid>` while a namer polls, `named` once a rename has landed,
  * and anything else (the legacy timestamp format, a hand-written marker)
- * terminal. The exclusive create makes concurrent detections and later
- * agents in the same tab no-op; a pending claim whose namer is dead was
- * orphaned (killed mid-poll, a reboot) and is taken over, so a wedged
- * claim cannot lock its tab out of naming forever. The claim is released
- * when naming fails — only by its current owner — so the tab gets another
- * chance on the next agent; it stays with the tab's name on success. Every
- * failure is quiet by design — a tab keeping its default label is not
- * worth a notification, and herdr's plugin log already records the run.
+ * terminal. The exclusive create elects one owner among concurrent
+ * attempts — status transitions fire on every turn boundary, so a named
+ * tab's claim is also what makes those firings cheap; a pending claim
+ * whose namer is dead was orphaned (killed mid-poll, a reboot) and is
+ * taken over, so a wedged claim cannot lock its tab out of naming forever.
+ * The claim is released when an attempt fails or expires — only by its
+ * current owner — so the next event re-arms a fresh attempt; it stays with
+ * the tab's name on success. Every failure is quiet by design — a tab
+ * keeping its default label is not worth a notification, and herdr's
+ * plugin log already records the run.
  */
 
-interface AgentDetectedEvent {
+export interface PaneEvent {
+  kind: "agent_detected" | "status_changed";
   paneId: string;
+  /** Only a detection can carry a release; a status event never does. */
   released: boolean;
 }
 
 const SIDEBAR_METADATA_SOURCE = "agentsurface:sidebar";
 const WORKTREE_MARKER = "";
 
-export function parseAgentDetected(eventJson: string): AgentDetectedEvent | null {
+export function parsePaneEvent(eventJson: string): PaneEvent | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(eventJson);
@@ -49,9 +58,17 @@ export function parseAgentDetected(eventJson: string): AgentDetectedEvent | null
   }
   const data = (parsed as { data?: unknown } | null)?.data;
   if (typeof data !== "object" || data === null) return null;
+  const type = (data as { type?: unknown }).type;
+  const kind =
+    type === "pane_agent_detected"
+      ? ("agent_detected" as const)
+      : type === "pane_agent_status_changed"
+        ? ("status_changed" as const)
+        : null;
+  if (kind === null) return null;
   const paneId = (data as { pane_id?: unknown }).pane_id;
   if (typeof paneId !== "string" || paneId === "") return null;
-  return { paneId, released: (data as { released?: unknown }).released === true };
+  return { kind, paneId, released: (data as { released?: unknown }).released === true };
 }
 
 /** Publish the label consumed by Herdr's configurable Agent sidebar. Linked
@@ -237,14 +254,15 @@ export interface TabNamerOptions {
    * longer alive may be taken over. */
   pid?: number;
   pidAlive?: (pid: number) => boolean;
-  /** How long to wait for herdr to learn the pane's session. A harness held
-   * at a startup dialog (a trust prompt, a login) reports no session until
-   * the dialog clears, so this window is sized for dialogs measured in
-   * minutes — the same span as the prompt window — not for the
-   * moments-after-detection happy path. */
+  /** How long to wait for herdr to learn the pane's session. Sized for
+   * report lag only: a harness held at a startup dialog reports no session
+   * until the dialog clears, and clearing fires a status transition that
+   * re-arms a fresh attempt — no window needs to outlast a human. */
   sessionTimeoutMs?: number;
   sessionPollMs?: number;
-  /** How long to wait for the conversation's first prompt. */
+  /** How long to wait for the conversation's first prompt. Sized for flush
+   * lag after a submit; an agent idling unprompted is re-armed by the
+   * status transition its first prompt causes. */
   promptTimeoutMs?: number;
   promptPollMs?: number;
 }
@@ -254,14 +272,14 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
   const now = options.now ?? Date.now;
   const pid = options.pid ?? process.pid;
   const pidAlive = options.pidAlive ?? processAlive;
-  const sessionTimeoutMs = options.sessionTimeoutMs ?? 600_000;
+  const sessionTimeoutMs = options.sessionTimeoutMs ?? 90_000;
   const sessionPollMs = options.sessionPollMs ?? 1_000;
-  const promptTimeoutMs = options.promptTimeoutMs ?? 600_000;
-  const promptPollMs = options.promptPollMs ?? 3_000;
+  const promptTimeoutMs = options.promptTimeoutMs ?? 90_000;
+  const promptPollMs = options.promptPollMs ?? 1_000;
 
-  const event = parseAgentDetected(options.eventJson);
+  const event = parsePaneEvent(options.eventJson);
   if (event === null) {
-    console.error("name-tab: HERDR_PLUGIN_EVENT_JSON held no pane_agent_detected event");
+    console.error("name-tab: HERDR_PLUGIN_EVENT_JSON held no pane agent event");
     return 2;
   }
   if (event.released) return 0;
@@ -348,18 +366,22 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
     return 2;
   }
   const call = createHerdrCall(env);
-  const event = parseAgentDetected(eventJson);
-  if (event !== null && !event.released) {
-    try {
-      await reportSidebarProjectToken(call, event.paneId);
-    } catch (error) {
-      console.error(`name-tab: sidebar project token failed: ${(error as Error).message}`);
-    }
-  }
-  return runTabNamer({
+  const event = parsePaneEvent(eventJson);
+  // The token rides detection only: a pane's project does not move on a
+  // status transition, and transitions fire every turn boundary. Publishing
+  // runs beside the namer, off naming's critical path.
+  const token =
+    event !== null && event.kind === "agent_detected" && !event.released
+      ? reportSidebarProjectToken(call, event.paneId).catch((error: Error) => {
+          console.error(`name-tab: sidebar project token failed: ${error.message}`);
+        })
+      : Promise.resolve();
+  const code = await runTabNamer({
     call,
     stateDir,
     eventJson,
     slug: createSlugAttempt(env, home),
   });
+  await token;
+  return code;
 }
