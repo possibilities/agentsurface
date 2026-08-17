@@ -42,7 +42,7 @@ describe("createWorkspace / createWorktree / createTab", () => {
       label: "alpha",
       focus: true,
     });
-    expect(surface).toEqual({ workspaceId: "w9", paneId: "w9:p1" });
+    expect(surface).toEqual({ workspaceId: "w9", paneId: "w9:p1", branch: null });
     expect(calls[0]).toEqual([
       "workspace",
       "create",
@@ -53,17 +53,21 @@ describe("createWorkspace / createWorktree / createTab", () => {
       "--focus",
     ]);
 
-    const worktree = fake([CREATED]);
-    await createWorktree(worktree.call, { cwd: "/code/alpha", branch: "fix-it", focus: false });
-    expect(worktree.calls[0]).toEqual([
-      "worktree",
-      "create",
-      "--cwd",
-      "/code/alpha",
-      "--branch",
-      "fix-it",
-      "--no-focus",
+    // No --branch: herdr names the worktree itself and reports its choice.
+    const worktree = fake([
+      {
+        result: {
+          ...(CREATED.result as object),
+          worktree: { branch: "worktree/calm-cloud-0009" },
+        },
+      },
     ]);
+    const worktreeSurface = await createWorktree(worktree.call, {
+      cwd: "/code/alpha",
+      focus: false,
+    });
+    expect(worktreeSurface.branch).toBe("worktree/calm-cloud-0009");
+    expect(worktree.calls[0]).toEqual(["worktree", "create", "--cwd", "/code/alpha", "--no-focus"]);
 
     const tab = fake([{ result: { tab: { tab_id: "w9:t2" }, root_pane: { pane_id: "w9:p7" } } }]);
     const tabSurface = await createTab(tab.call, {
@@ -71,7 +75,7 @@ describe("createWorkspace / createWorktree / createTab", () => {
       cwd: "/code/alpha",
       focus: false,
     });
-    expect(tabSurface).toEqual({ workspaceId: "w9", paneId: "w9:p7" });
+    expect(tabSurface).toEqual({ workspaceId: "w9", paneId: "w9:p7", branch: null });
     expect(tab.calls[0]).toEqual([
       "tab",
       "create",

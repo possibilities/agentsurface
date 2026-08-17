@@ -39,7 +39,6 @@ function fake(responses: HerdrResponse[]): { call: HerdrCall; calls: string[][] 
 const PLAN: DetachedLaunch = {
   project: { path: "/code/alpha", display: "~/code/alpha", count: 0 },
   worktree: false,
-  branch: null,
   harness: "claude",
   model: "fable",
   effort: "max",
@@ -167,5 +166,24 @@ describe("executeLaunch", () => {
     const record = JSON.parse(readFileSync(path, "utf8").trim());
     expect(record.workspace).toBe("w7");
     expect(record.agent).toBe("claude-1");
+  });
+
+  test("a worktree launch is branchless; herdr's chosen name lands in the record", async () => {
+    const { call, calls } = fake([
+      {
+        result: {
+          ...(CREATED.result as object),
+          worktree: { branch: "worktree/calm-cloud-0009" },
+        },
+      },
+      { result: { agents: [] } },
+      { result: {} },
+    ]);
+    const path = logPath();
+    await executeLaunch(call, path, { ...PLAN, worktree: true });
+
+    expect(calls[0]).toEqual(["worktree", "create", "--cwd", "/code/alpha", "--no-focus"]);
+    const record = JSON.parse(readFileSync(path, "utf8").trim());
+    expect(record.branch).toBe("worktree/calm-cloud-0009");
   });
 });

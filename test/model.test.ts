@@ -11,11 +11,11 @@ import {
   failRun,
   handleFormKey,
   type KeyEvent,
+  pasteIntoIntent,
   resetForAnother,
   setEffort,
   setHarness,
   setModel,
-  slugify,
 } from "../src/launch/model.ts";
 import type { ProjectChoice } from "../src/projects.ts";
 
@@ -74,32 +74,11 @@ describe("createForm", () => {
   });
 });
 
-describe("prompt and branch", () => {
-  test("typing feeds the intent and suggests a branch until edited", () => {
+describe("the prompt", () => {
+  test("typing feeds the intent", () => {
     const state = form();
     type(state, "Fix the bug");
     expect(state.prompt).toBe("Fix the bug");
-    expect(state.branch).toBe("fix-the-bug");
-
-    handleFormKey(state, key("tab"));
-    handleFormKey(state, key("w"));
-    expect(state.worktree).toBe(true);
-    state.focus = "branch";
-    type(state, "x");
-    expect(state.branch).toBe("fix-the-bugx");
-    expect(state.branchEdited).toBe(true);
-
-    state.focus = "prompt";
-    type(state, "!");
-    expect(state.branch).toBe("fix-the-bugx");
-  });
-
-  test("branch input keeps only branch-safe characters", () => {
-    const state = form();
-    state.worktree = true;
-    state.focus = "branch";
-    type(state, "a b!c/d");
-    expect(state.branch).toBe("abc/d");
   });
 
   test("cursor editing inserts and deletes at the cursor", () => {
@@ -127,7 +106,7 @@ describe("focus traversal", () => {
     expect(handleFormKey(state, key("return")).kind).toBe("launch");
   });
 
-  test("tab order skips the branch row until a worktree is asked for", () => {
+  test("tab cycles the six rows", () => {
     const state = form();
     const seen: string[] = [];
     for (let i = 0; i < 6; i++) {
@@ -135,11 +114,6 @@ describe("focus traversal", () => {
       seen.push(state.focus);
     }
     expect(seen).toEqual(["project", "worktree", "harness", "model", "effort", "prompt"]);
-
-    state.worktree = true;
-    state.focus = "worktree";
-    handleFormKey(state, key("tab"));
-    expect(state.focus as string).toBe("branch");
   });
 
   test("escape quits; shift-tab and up go backwards", () => {
@@ -249,17 +223,14 @@ describe("buildPlan", () => {
     expect(plan).not.toBeNull();
     expect(plan?.level).toBe("opus:medium");
     expect(plan?.project.path).toBe("/home/u/code/alpha");
-    expect(plan?.branch).toBeNull();
     expect(plan?.prompt).toBe("Fix the bug");
   });
 
-  test("a worktree without a branch refuses and focuses the branch row", () => {
+  test("a worktree launch needs no branch: herdr names it", () => {
     const state = form();
     state.worktree = true;
     const plan = buildPlan(state);
-    expect(plan).toBeNull();
-    expect(state.notice?.text).toContain("branch");
-    expect(state.focus).toBe("branch");
+    expect(plan?.worktree).toBe(true);
   });
 
   test("no projects refuses with a notice", () => {
@@ -318,18 +289,16 @@ describe("readline editing", () => {
     expect(state.cursor).toBe(10); // end of beta
   });
 
-  test("kills edit the intent and re-suggest the branch", () => {
+  test("kills edit the intent", () => {
     const state = seed();
     press(state, "w", { ctrl: true });
     expect(state.prompt).toBe("alpha beta ");
-    expect(state.branch).toBe("alpha-beta");
     press(state, "a", { ctrl: true });
     press(state, "d", { meta: true });
     expect(state.prompt).toBe(" beta ");
     press(state, "e", { ctrl: true });
     press(state, "u", { ctrl: true });
     expect(state.prompt).toBe("");
-    expect(state.branch).toBe("");
   });
 
   test("delete works forwards and ctrl+h backwards", () => {
@@ -359,7 +328,20 @@ describe("applyEditedIntent", () => {
     applyEditedIntent(state, "Fix the queue\r\nand add a test\n\n");
     expect(state.prompt).toBe("Fix the queue\nand add a test");
     expect(state.cursor).toBe(state.prompt.length);
-    expect(state.branch).toBe("fix-the-queue-and-add-a-test");
+  });
+});
+
+describe("pasteIntoIntent", () => {
+  test("inserts at the cursor, prompt-focused only, newlines kept", () => {
+    const state = form();
+    type(state, "ab");
+    state.cursor = 1;
+    pasteIntoIntent(state, "one\r\ntwo");
+    expect(state.prompt).toBe("aone\ntwob");
+    expect(state.cursor).toBe(8);
+    state.focus = "harness";
+    pasteIntoIntent(state, "ignored");
+    expect(state.prompt).toBe("aone\ntwob");
   });
 });
 
@@ -406,27 +388,16 @@ describe("createForm defaults", () => {
 });
 
 describe("resetForAnother", () => {
-  test("clears the intent and branch, keeps the config, and confirms", () => {
+  test("clears the intent, keeps the config, and confirms", () => {
     const state = form();
     type(state, "First launch");
     state.worktree = true;
     setHarness(state, 1);
     resetForAnother(state, "started codex · ~/code/alpha");
     expect(state.prompt).toBe("");
-    expect(state.branch).toBe("");
-    expect(state.branchEdited).toBe(false);
     expect(state.worktree).toBe(true);
     expect(currentHarness(state).harness).toBe("codex");
     expect(state.focus).toBe("prompt");
     expect(state.notice?.tone).toBe("ok");
-  });
-});
-
-describe("slugify", () => {
-  test("kebabs, trims, and caps the suggestion", () => {
-    expect(slugify("Fix the Flaky retry! test")).toBe("fix-the-flaky-retry-test");
-    expect(slugify("  ")).toBe("");
-    expect(slugify("a".repeat(60)).length).toBeLessThanOrEqual(40);
-    expect(slugify("Trailing punctuation!!!")).toBe("trailing-punctuation");
   });
 });

@@ -1,4 +1,5 @@
-import { basename } from "node:path";
+import { closeSync, mkdirSync, openSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { UsageError } from "../errors.ts";
 import {
   createTab,
@@ -55,17 +56,27 @@ export function parseDetachedLaunch(json: string): DetachedLaunch {
   return plan;
 }
 
-export function spawnDetachedLaunch(env: Environ, plan: DetachedLaunch): void {
+/** The child's stderr appends to a log beside the launch records: a crash
+ * before the executor's own failure handling must still leave evidence. */
+export function spawnDetachedLaunch(env: Environ, logPath: string, plan: DetachedLaunch): void {
+  let stderr: number | "ignore" = "ignore";
+  try {
+    mkdirSync(dirname(logPath), { recursive: true });
+    stderr = openSync(join(dirname(logPath), "executor.log"), "a");
+  } catch {
+    // No log home; the launch still matters more than its evidence.
+  }
   const proc = Bun.spawn(
     [process.execPath, process.argv[1] ?? "agentsurface", "execute-launch", JSON.stringify(plan)],
     {
       stdin: "ignore",
       stdout: "ignore",
-      stderr: "ignore",
+      stderr,
       env: env as Record<string, string>,
     },
   );
   proc.unref();
+  if (typeof stderr === "number") closeSync(stderr);
 }
 
 /** Two launches fired in quick succession can race to the same `<kind>-<n>`
@@ -78,11 +89,7 @@ export async function executeLaunch(
 ): Promise<void> {
   let surface: Awaited<ReturnType<typeof createWorkspace>>;
   if (plan.worktree) {
-    surface = await createWorktree(call, {
-      cwd: plan.project.path,
-      branch: plan.branch ?? "",
-      focus: plan.focus,
-    });
+    surface = await createWorktree(call, { cwd: plan.project.path, focus: plan.focus });
   } else {
     // A project already on the surface gets a new tab in its workspace; a
     // workspace is created only when none exists.
@@ -132,7 +139,7 @@ export async function executeLaunch(
     model: plan.model,
     effort: plan.effort,
     worktree: plan.worktree,
-    branch: plan.branch,
+    branch: surface.branch,
     workspace: surface.workspaceId,
     agent: name,
   });

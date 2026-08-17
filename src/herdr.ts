@@ -76,24 +76,29 @@ export async function invoke(call: HerdrCall, args: string[]): Promise<unknown> 
   return response.result;
 }
 
-/** What a launch needs from a workspace or worktree create response. Both
- * responses carry workspace, tab, and root_pane by herdr's API schema. */
+/** What a launch needs from a create response. Every create carries
+ * workspace, tab, and root_pane by herdr's API schema; a worktree create
+ * also names the branch herdr generated. */
 export interface CreatedSurface {
   workspaceId: string;
   paneId: string;
+  /** The branch herdr chose for a worktree; null for plain surfaces. */
+  branch: string | null;
 }
 
 function surfaceFrom(result: unknown, what: string): CreatedSurface {
   const body = result as {
     workspace?: { workspace_id?: unknown };
     root_pane?: { pane_id?: unknown };
+    worktree?: { branch?: unknown };
   } | null;
   const workspaceId = body?.workspace?.workspace_id;
   const paneId = body?.root_pane?.pane_id;
   if (typeof workspaceId !== "string" || typeof paneId !== "string") {
     throw new HerdrError(`herdr's ${what} response named no workspace and root pane`);
   }
-  return { workspaceId, paneId };
+  const branch = body?.worktree?.branch;
+  return { workspaceId, paneId, branch: typeof branch === "string" ? branch : null };
 }
 
 export async function createWorkspace(
@@ -112,17 +117,17 @@ export async function createWorkspace(
   return surfaceFrom(result, "workspace create");
 }
 
+/** No --branch: herdr generates and owns the worktree's branch name; the
+ * response reports what it chose. */
 export async function createWorktree(
   call: HerdrCall,
-  options: { cwd: string; branch: string; focus: boolean },
+  options: { cwd: string; focus: boolean },
 ): Promise<CreatedSurface> {
   const result = await invoke(call, [
     "worktree",
     "create",
     "--cwd",
     options.cwd,
-    "--branch",
-    options.branch,
     options.focus ? "--focus" : "--no-focus",
   ]);
   return surfaceFrom(result, "worktree create");
@@ -145,7 +150,7 @@ export async function createTab(
   if (typeof paneId !== "string") {
     throw new HerdrError("herdr's tab create response named no root pane");
   }
-  return { workspaceId: options.workspaceId, paneId };
+  return { workspaceId: options.workspaceId, paneId, branch: null };
 }
 
 export async function focusWorkspace(call: HerdrCall, workspaceId: string): Promise<void> {

@@ -22,7 +22,7 @@ export interface KeyEvent {
   sequence?: string;
 }
 
-export type Field = "prompt" | "project" | "worktree" | "branch" | "harness" | "model" | "effort";
+export type Field = "prompt" | "project" | "worktree" | "harness" | "model" | "effort";
 
 export type Phase = { kind: "form" } | { kind: "failed"; message: string };
 
@@ -43,8 +43,6 @@ export interface FormState {
   projects: ProjectChoice[];
   projectIndex: number;
   worktree: boolean;
-  branch: string;
-  branchEdited: boolean;
   harnesses: LaunchHarness[];
   harnessIndex: number;
   modelIndex: number;
@@ -75,8 +73,6 @@ export function createForm(inputs: {
     projects: inputs.projects,
     projectIndex: 0,
     worktree: false,
-    branch: "",
-    branchEdited: false,
     harnesses: inputs.harnesses,
     harnessIndex: 0,
     modelIndex: 0,
@@ -138,16 +134,18 @@ function snapEffort(state: FormState, keep: string | null): void {
   state.effortIndex = want !== undefined ? model.efforts.indexOf(want) : model.efforts.length - 1;
 }
 
-function fieldOrder(state: FormState): Field[] {
-  return state.worktree
-    ? ["prompt", "project", "worktree", "branch", "harness", "model", "effort"]
-    : ["prompt", "project", "worktree", "harness", "model", "effort"];
-}
+const FIELD_ORDER: readonly Field[] = [
+  "prompt",
+  "project",
+  "worktree",
+  "harness",
+  "model",
+  "effort",
+];
 
 function moveFocus(state: FormState, delta: number): void {
-  const order = fieldOrder(state);
-  const at = Math.max(0, order.indexOf(state.focus));
-  state.focus = order[(at + delta + order.length) % order.length]!;
+  const at = Math.max(0, FIELD_ORDER.indexOf(state.focus));
+  state.focus = FIELD_ORDER[(at + delta + FIELD_ORDER.length) % FIELD_ORDER.length]!;
 }
 
 function wrap(index: number, delta: number, length: number): number {
@@ -203,36 +201,16 @@ export function setEffort(state: FormState, index: number): void {
 
 export function toggleWorktree(state: FormState): void {
   state.worktree = !state.worktree;
-  if (!state.worktree && state.focus === "branch") state.focus = "worktree";
 }
 
 export function setProject(state: FormState, index: number): void {
   if (index >= 0 && index < state.projects.length) state.projectIndex = index;
 }
 
-/** A branch name suggested from the intent, until the operator edits it. */
-export function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40)
-    .replace(/-+$/, "");
-}
-
-const BRANCH_CHARACTER = /[A-Za-z0-9._/-]/;
-
-function editPrompt(state: FormState, edit: () => void): void {
-  edit();
-  if (!state.branchEdited) state.branch = slugify(state.prompt);
-}
-
 function insertIntoPrompt(state: FormState, text: string): void {
   const clean = text.replace(/[\r\n]+/g, " ");
-  editPrompt(state, () => {
-    state.prompt = state.prompt.slice(0, state.cursor) + clean + state.prompt.slice(state.cursor);
-    state.cursor += clean.length;
-  });
+  state.prompt = state.prompt.slice(0, state.cursor) + clean + state.prompt.slice(state.cursor);
+  state.cursor += clean.length;
 }
 
 // --- readline-style intent editing --------------------------------------
@@ -255,19 +233,23 @@ function wordRight(text: string, at: number): number {
 
 function killIntentRange(state: FormState, from: number, to: number): void {
   if (from >= to) return;
-  editPrompt(state, () => {
-    state.prompt = state.prompt.slice(0, from) + state.prompt.slice(to);
-    state.cursor = from;
-  });
+  state.prompt = state.prompt.slice(0, from) + state.prompt.slice(to);
+  state.cursor = from;
 }
 
 /** The editor's answer replaces the intent wholesale; a trailing newline is
  * the editor's punctuation, not the operator's. */
 export function applyEditedIntent(state: FormState, text: string): void {
-  editPrompt(state, () => {
-    state.prompt = text.replace(/\r\n/g, "\n").replace(/\n+$/, "");
-    state.cursor = state.prompt.length;
-  });
+  state.prompt = text.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+  state.cursor = state.prompt.length;
+}
+
+/** Bracketed paste arrives whole; newlines survive, as from the editor. */
+export function pasteIntoIntent(state: FormState, text: string): void {
+  if (state.phase.kind !== "form" || state.focus !== "prompt") return;
+  const clean = text.replace(/\r\n/g, "\n");
+  state.prompt = state.prompt.slice(0, state.cursor) + clean + state.prompt.slice(state.cursor);
+  state.cursor += clean.length;
 }
 
 /** Printable input, as OpenTUI hands it over: a sequence with no control
@@ -404,24 +386,6 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
     return { kind: "none" };
   }
 
-  if (state.focus === "branch") {
-    if (name === "backspace") {
-      state.branch = state.branch.slice(0, -1);
-      state.branchEdited = true;
-      return { kind: "none" };
-    }
-    const text = printable(key);
-    if (text !== null) {
-      const clean = [...text].filter((character) => BRANCH_CHARACTER.test(character)).join("");
-      if (clean.length > 0) {
-        state.branch += clean;
-        state.branchEdited = true;
-      }
-      return { kind: "none" };
-    }
-    return { kind: "none" };
-  }
-
   // Select rows: arrows cycle; space, and the palette's advertised letters,
   // act directly — text fields above consumed their printables already.
   if (name === "left") {
@@ -462,8 +426,8 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
 
 export interface LaunchPlan {
   project: ProjectChoice;
+  /** Herdr names a worktree's branch itself at creation; no name travels. */
   worktree: boolean;
-  branch: string | null;
   harness: string;
   model: string;
   effort: string;
@@ -477,17 +441,11 @@ export function buildPlan(state: FormState): LaunchPlan | null {
     state.notice = { text: "no projects under the configured roots", tone: "warn" };
     return null;
   }
-  if (state.worktree && state.branch === "") {
-    state.notice = { text: "a worktree needs a branch name", tone: "warn" };
-    state.focus = "branch";
-    return null;
-  }
   const model = currentModel(state);
   const effort = currentEffort(state);
   return {
     project: state.projects[state.projectIndex]!,
     worktree: state.worktree,
-    branch: state.worktree ? state.branch : null,
     harness: currentHarness(state).harness,
     model: model.model,
     effort,
@@ -505,8 +463,6 @@ export function failRun(state: FormState, message: string): void {
 export function resetForAnother(state: FormState, message: string): void {
   state.prompt = "";
   state.cursor = 0;
-  state.branch = "";
-  state.branchEdited = false;
   state.focus = "prompt";
   state.phase = { kind: "form" };
   state.notice = { text: message, tone: "ok" };
@@ -653,17 +609,6 @@ export function buildFormLines(state: FormState, width: number): Line[] {
         : span(`${GLYPHS.idle} no worktree`, "muted"),
     ]),
   );
-  if (state.worktree) {
-    const focused = state.focus === "branch" && state.phase.kind === "form";
-    lines.push(
-      fieldRow(state, "branch", "branch", [
-        state.branch === ""
-          ? span("branch-name", "muted")
-          : span(fit(state.branch, width - LABEL_WIDTH - 6), "text"),
-        ...(focused ? [cursorSpan(" ")] : []),
-      ]),
-    );
-  }
   lines.push([]);
 
   lines.push(

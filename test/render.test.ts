@@ -49,14 +49,13 @@ describe("buildFormLines", () => {
     expect(projectRow?.startsWith("▎")).toBe(true);
   });
 
-  test("the branch row exists only when a worktree is asked for", () => {
+  test("the worktree row states itself; herdr owns the branch name", () => {
     const state = form();
     expect(rows(state, 76).some((row) => row.includes("branch"))).toBe(false);
     state.worktree = true;
-    state.branch = "fix-it";
     const text = rows(state, 76).join("\n");
     expect(text).toContain("● new worktree");
-    expect(text).toContain("fix-it");
+    expect(text).not.toContain("branch");
   });
 
   test("no row exceeds the frame at the contract widths", () => {

@@ -18,6 +18,7 @@ import {
   currentModel,
   failRun,
   handleFormKey,
+  pasteIntoIntent,
   resetForAnother,
   setEffort,
   setHarness,
@@ -305,7 +306,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       return;
     }
     try {
-      spawnDetachedLaunch(env, { ...plan, focus });
+      spawnDetachedLaunch(env, logPath, { ...plan, focus });
     } catch (error) {
       failRun(state, error instanceof Error ? error.message : String(error));
       paint();
@@ -317,10 +318,19 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     }
     resetForAnother(
       state,
-      `started ${plan.harness} ${GLYPHS.sep} ${plan.project.display}${plan.worktree ? ` ${GLYPHS.sep} ${plan.branch}` : ""}`,
+      `started ${plan.harness} ${GLYPHS.sep} ${plan.project.display}${plan.worktree ? ` ${GLYPHS.sep} worktree` : ""}`,
     );
     paint();
   };
+
+  renderer.keyInput.on("paste", (event: { bytes: Uint8Array }) => {
+    if (editing) return;
+    const anyOverlayOpen =
+      commands.isOpen() || Object.values(choosers).some((overlay) => overlay.isOpen());
+    if (anyOverlayOpen) return;
+    pasteIntoIntent(state, new TextDecoder().decode(event.bytes));
+    paint();
+  });
 
   renderer.keyInput.on("keypress", (key) => {
     if (editing) return;
