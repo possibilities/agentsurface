@@ -1,3 +1,6 @@
+import { unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { loadLaunchCatalog } from "../catalog.ts";
 import { loadConfig } from "../config.ts";
 import { createHerdrCall, invoke } from "../herdr.ts";
@@ -6,6 +9,7 @@ import { orderProjects, scanProjects } from "../projects.ts";
 import { launchLogPath, readLastLaunch, readLaunchCounts } from "../state.ts";
 import { spawnDetachedLaunch } from "./executor.ts";
 import {
+  applyEditedIntent,
   buildFormLines,
   buildPlan,
   type ChooseField,
@@ -118,8 +122,13 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     for (const line of lines) {
       for (const part of line) {
         if (part.text.length === 0) continue;
-        let chunk = core.fg(SIGNAL_ROOM[part.token])(part.text);
-        if (part.bold === true) chunk = core.bold(chunk);
+        let chunk: ReturnType<typeof core.bold>;
+        if (part.cursor === true) {
+          chunk = core.bg(SIGNAL_ROOM.accent)(core.fg(SIGNAL_ROOM.canvas)(part.text));
+        } else {
+          chunk = core.fg(SIGNAL_ROOM[part.token])(part.text);
+          if (part.bold === true) chunk = core.bold(chunk);
+        }
         chunks.push(chunk);
       }
       chunks.push(core.fg(SIGNAL_ROOM.text)("\n"));
@@ -216,13 +225,14 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
         paint();
       },
     },
+    { id: "editor", key: "⌃G", label: "edit intent in $EDITOR", onRun: () => void editIntent() },
     { id: "quit", key: "ESC", label: "quit without launching", onRun: () => shutdown(0) },
   ];
 
   const paint = (): void => {
     const columns = process.stdout.columns ?? 80;
     const rows = renderer.height || process.stdout.rows || 24;
-    const width = Math.max(36, Math.min(columns - 4, 96));
+    const width = Math.max(36, columns - 4);
     body.content = linesToStyled(buildFormLines(state, width));
     commands.update({ width: columns, height: rows, items: commandItems() });
     for (const field of ["project", "harness", "model", "effort"] as const) {
@@ -234,6 +244,55 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   const openChooser = (field: ChooseField): void => {
     paint();
     choosers[field].open(chooserIndex(field));
+  };
+
+  /** The way the harnesses do it: suspend the TUI, hand the intent to
+   * $EDITOR (VISUAL first, its arguments honored through the shell), and
+   * read the answer back on exit. */
+  let editing = false;
+  const editIntent = async (): Promise<void> => {
+    if (editing || state.phase.kind !== "form") return;
+    editing = true;
+    const editor = env["VISUAL"] ?? env["EDITOR"] ?? "vi";
+    const file = join(tmpdir(), `agentsurface-intent-${process.pid}-${Date.now()}.md`);
+    let outcome: { kind: "edited"; text: string } | { kind: "unchanged" } | { kind: "unrunnable" };
+    try {
+      await Bun.write(file, state.prompt);
+      renderer.suspend();
+      try {
+        const proc = Bun.spawn(["/bin/sh", "-c", `${editor} "$1"`, "sh", file], {
+          stdin: "inherit",
+          stdout: "inherit",
+          stderr: "inherit",
+          env: env as Record<string, string>,
+        });
+        const code = await proc.exited;
+        outcome =
+          code === 0
+            ? { kind: "edited", text: await Bun.file(file).text() }
+            : { kind: "unchanged" };
+      } finally {
+        renderer.resume();
+      }
+    } catch {
+      outcome = { kind: "unrunnable" };
+    } finally {
+      try {
+        unlinkSync(file);
+      } catch {
+        // Already gone; nothing to clean.
+      }
+    }
+    editing = false;
+    if (outcome.kind === "edited") {
+      applyEditedIntent(state, outcome.text);
+      state.focus = "prompt";
+    } else if (outcome.kind === "unchanged") {
+      state.notice = { text: "editor exited nonzero · intent unchanged", tone: "warn" };
+    } else {
+      state.notice = { text: `could not run ${editor}`, tone: "warn" };
+    }
+    paint();
   };
 
   /** Freeze the plan and hand it to the detached executor; the popup owes
@@ -264,6 +323,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   };
 
   renderer.keyInput.on("keypress", (key) => {
+    if (editing) return;
     if (key.ctrl && key.name === "c") {
       shutdown(130);
       return;
@@ -298,6 +358,9 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
         return;
       case "launchAnother":
         submitLaunch(false);
+        return;
+      case "editIntent":
+        void editIntent();
         return;
       default:
         paint();

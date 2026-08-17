@@ -87,11 +87,26 @@ describe("buildFormLines", () => {
     expect(text).toContain("ESC QUIT · ⏎ BACK");
   });
 
-  test("the focused prompt carries a cursor at its position", () => {
+  test("the cursor overlays its character instead of displacing the text", () => {
     const state = form();
     state.prompt = "abc";
     state.cursor = 1;
-    const first = rows(state, 76)[0]!;
-    expect(first).toContain("a▌bc");
+    const lines = buildFormLines(state, 76);
+    const first = lines[0]!;
+    // The row's text is exactly the prompt — no inserted cursor glyph.
+    expect(first.map((span) => span.text).join("")).toBe("│ abc");
+    const cursor = first.find((span) => span.cursor === true);
+    expect(cursor?.text).toBe("b");
+  });
+
+  test("newlines from the editor break rows; the cursor rides its line", () => {
+    const state = form();
+    state.prompt = "one\ntwo";
+    state.cursor = 3; // on the newline: end of the first line
+    const lines = rows(state, 76);
+    expect(lines[0]).toBe("│ one ");
+    expect(lines[1]).toBe("│ two");
+    const cursor = buildFormLines(state, 76)[0]!.find((span) => span.cursor === true);
+    expect(cursor?.text).toBe(" ");
   });
 });

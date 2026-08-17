@@ -34,7 +34,8 @@ export type FormAction =
   | { kind: "quit" }
   | { kind: "launch" }
   | { kind: "launchAnother" }
-  | { kind: "choose"; field: ChooseField };
+  | { kind: "choose"; field: ChooseField }
+  | { kind: "editIntent" };
 
 export interface FormState {
   prompt: string;
@@ -234,6 +235,41 @@ function insertIntoPrompt(state: FormState, text: string): void {
   });
 }
 
+// --- readline-style intent editing --------------------------------------
+
+const WORD_CHARACTER = /[A-Za-z0-9_]/;
+
+function wordLeft(text: string, at: number): number {
+  let index = at;
+  while (index > 0 && !WORD_CHARACTER.test(text[index - 1]!)) index -= 1;
+  while (index > 0 && WORD_CHARACTER.test(text[index - 1]!)) index -= 1;
+  return index;
+}
+
+function wordRight(text: string, at: number): number {
+  let index = at;
+  while (index < text.length && !WORD_CHARACTER.test(text[index]!)) index += 1;
+  while (index < text.length && WORD_CHARACTER.test(text[index]!)) index += 1;
+  return index;
+}
+
+function killIntentRange(state: FormState, from: number, to: number): void {
+  if (from >= to) return;
+  editPrompt(state, () => {
+    state.prompt = state.prompt.slice(0, from) + state.prompt.slice(to);
+    state.cursor = from;
+  });
+}
+
+/** The editor's answer replaces the intent wholesale; a trailing newline is
+ * the editor's punctuation, not the operator's. */
+export function applyEditedIntent(state: FormState, text: string): void {
+  editPrompt(state, () => {
+    state.prompt = text.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+    state.cursor = state.prompt.length;
+  });
+}
+
 /** Printable input, as OpenTUI hands it over: a sequence with no control
  * modifier, one character from typing or many from a paste. */
 function printable(key: KeyEvent): string | null {
@@ -260,6 +296,7 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
   const name = key.name;
 
   if (name === "escape") return { kind: "quit" };
+  if (key.ctrl === true && name === "g") return { kind: "editIntent" };
   if (name === "tab") {
     moveFocus(state, key.shift === true ? -1 : 1);
     return { kind: "none" };
@@ -285,21 +322,81 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
   }
 
   if (state.focus === "prompt") {
+    const length = state.prompt.length;
+    const backspace = (): void => killIntentRange(state, state.cursor - 1, state.cursor);
+    const deleteForward = (): void => killIntentRange(state, state.cursor, state.cursor + 1);
+    // The readline motions the fleet's shells already teach. ctrl+c and
+    // ctrl+k never arrive here — the terminal owns the interrupt and the
+    // palette owns its fleet-wide chord, so kill-to-end stays unbound.
+    if (key.ctrl === true) {
+      switch (name) {
+        case "a":
+          state.cursor = 0;
+          break;
+        case "e":
+          state.cursor = length;
+          break;
+        case "b":
+          state.cursor = Math.max(0, state.cursor - 1);
+          break;
+        case "f":
+          state.cursor = Math.min(length, state.cursor + 1);
+          break;
+        case "d":
+          deleteForward();
+          break;
+        case "h":
+          backspace();
+          break;
+        case "u":
+          killIntentRange(state, 0, state.cursor);
+          break;
+        case "w":
+          killIntentRange(state, wordLeft(state.prompt, state.cursor), state.cursor);
+          break;
+        default:
+          break;
+      }
+      return { kind: "none" };
+    }
+    if (key.meta === true) {
+      switch (name) {
+        case "b":
+          state.cursor = wordLeft(state.prompt, state.cursor);
+          break;
+        case "f":
+          state.cursor = wordRight(state.prompt, state.cursor);
+          break;
+        case "d":
+          killIntentRange(state, state.cursor, wordRight(state.prompt, state.cursor));
+          break;
+        default:
+          break;
+      }
+      return { kind: "none" };
+    }
     if (name === "left") {
       state.cursor = Math.max(0, state.cursor - 1);
       return { kind: "none" };
     }
     if (name === "right") {
-      state.cursor = Math.min(state.prompt.length, state.cursor + 1);
+      state.cursor = Math.min(length, state.cursor + 1);
+      return { kind: "none" };
+    }
+    if (name === "home") {
+      state.cursor = 0;
+      return { kind: "none" };
+    }
+    if (name === "end") {
+      state.cursor = length;
+      return { kind: "none" };
+    }
+    if (name === "delete") {
+      deleteForward();
       return { kind: "none" };
     }
     if (name === "backspace") {
-      if (state.cursor > 0) {
-        editPrompt(state, () => {
-          state.prompt = state.prompt.slice(0, state.cursor - 1) + state.prompt.slice(state.cursor);
-          state.cursor -= 1;
-        });
-      }
+      backspace();
       return { kind: "none" };
     }
     const text = printable(key);
@@ -436,62 +533,82 @@ function centered(text: string, width: number): string {
   return `${" ".repeat(pad)}${text}`;
 }
 
-/** The intent block: an amber input rail, wrapped text, a cursor when
- * focused, and an invitation when empty. */
+function cursorSpan(text: string): Span {
+  return { text, token: "text", cursor: true };
+}
+
+interface PromptRow {
+  text: string;
+  start: number;
+}
+
+/** Logical lines split on newlines (the $EDITOR path writes them), each
+ * wrapped to the frame; absolute offsets keep the cursor addressable. */
+function promptRowsFor(prompt: string, inner: number): PromptRow[] {
+  const rows: PromptRow[] = [];
+  let offset = 0;
+  for (const line of prompt.split("\n")) {
+    if (line.length === 0) {
+      rows.push({ text: "", start: offset });
+    } else {
+      for (let at = 0; at < line.length; at += inner) {
+        rows.push({ text: line.slice(at, at + inner), start: offset + at });
+      }
+    }
+    offset += line.length + 1;
+  }
+  return rows;
+}
+
+/** The intent block: an amber input rail, wrapped text, an overlay block
+ * cursor when focused — it colors its character, never displaces it — and
+ * an invitation when empty. */
 function promptLines(state: FormState, width: number): Line[] {
   const inner = Math.max(8, width - 4);
-  const focused = state.focus === "prompt";
+  const focused = state.focus === "prompt" && state.phase.kind === "form";
   if (state.prompt.length === 0) {
-    return [
-      [
-        span(`${GLYPHS.inputRail} `, "local"),
-        focused ? span(GLYPHS.cursor, "accent") : span("", "text"),
-        span("describe the work", "muted"),
-        span(GLYPHS.ellipsis, "muted"),
-      ],
-    ];
+    const invitation: Span[] = [span(`${GLYPHS.inputRail} `, "local")];
+    if (focused) invitation.push(cursorSpan(" "));
+    invitation.push(span("describe the work", "muted"), span(GLYPHS.ellipsis, "muted"));
+    return [invitation];
   }
-  interface Row {
-    text: string;
-    cursorAt: number | null;
-  }
-  const rows: Row[] = [];
-  for (let start = 0; start < state.prompt.length; start += inner) {
-    const text = state.prompt.slice(start, start + inner);
-    const cursorAt =
-      focused && state.cursor >= start && state.cursor < start + inner
-        ? state.cursor - start
-        : null;
-    rows.push({ text, cursorAt });
-  }
-  const last = rows[rows.length - 1]!;
-  if (focused && state.cursor === state.prompt.length) {
-    if (last.text.length >= inner) rows.push({ text: "", cursorAt: 0 });
-    else last.cursorAt = last.text.length;
+  const rows = promptRowsFor(state.prompt, inner);
+  // The cursor's row: at a wrap boundary the later row wins, so the cursor
+  // sits where the next character will land; at a newline the earlier row
+  // keeps it, at its line's end.
+  let cursorRow = rows.length - 1;
+  for (let index = 0; index < rows.length; index++) {
+    const row = rows[index]!;
+    const next = rows[index + 1];
+    const end = row.start + row.text.length;
+    if (
+      state.cursor >= row.start &&
+      (state.cursor < end || next === undefined || state.cursor < next.start)
+    ) {
+      cursorRow = index;
+      break;
+    }
   }
   let visible = rows;
+  let visibleCursorRow = cursorRow;
   if (rows.length > PROMPT_ROWS_MAX) {
-    const cursorRow = Math.max(
-      0,
-      rows.findIndex((row) => row.cursorAt !== null),
-    );
     const start = Math.min(
       Math.max(0, cursorRow - (PROMPT_ROWS_MAX - 1)),
       rows.length - PROMPT_ROWS_MAX,
     );
     visible = rows.slice(start, start + PROMPT_ROWS_MAX);
+    visibleCursorRow = cursorRow - start;
   }
-  return visible.map((row) => {
+  return visible.map((row, index) => {
     const parts: Span[] = [span(`${GLYPHS.inputRail} `, "local")];
-    if (row.cursorAt === null) {
+    if (!focused || index !== visibleCursorRow) {
       parts.push(span(row.text, "text"));
-    } else {
-      parts.push(
-        span(row.text.slice(0, row.cursorAt), "text"),
-        span(GLYPHS.cursor, "accent"),
-        span(row.text.slice(row.cursorAt), "text"),
-      );
+      return parts;
     }
+    const column = Math.min(Math.max(0, state.cursor - row.start), row.text.length);
+    parts.push(span(row.text.slice(0, column), "text"));
+    parts.push(cursorSpan(row.text.slice(column, column + 1) || " "));
+    parts.push(span(row.text.slice(column + 1), "text"));
     return parts;
   });
 }
@@ -540,13 +657,13 @@ export function buildFormLines(state: FormState, width: number): Line[] {
     ]),
   );
   if (state.worktree) {
-    const focused = state.focus === "branch";
+    const focused = state.focus === "branch" && state.phase.kind === "form";
     lines.push(
       fieldRow(state, "branch", "branch", [
         state.branch === ""
           ? span("branch-name", "muted")
           : span(fit(state.branch, width - LABEL_WIDTH - 6), "text"),
-        ...(focused ? [span(GLYPHS.cursor, "accent")] : []),
+        ...(focused ? [cursorSpan(" ")] : []),
       ]),
     );
   }

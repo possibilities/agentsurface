@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { LaunchHarness } from "../src/catalog.ts";
 import {
+  applyEditedIntent,
   buildPlan,
   createForm,
   currentEffort,
@@ -277,6 +278,88 @@ describe("failed phase", () => {
     expect(state.phase.kind).toBe("form");
     failRun(state, "again");
     expect(handleFormKey(state, key("escape")).kind).toBe("quit");
+  });
+});
+
+describe("readline editing", () => {
+  const seed = (): FormState => {
+    const state = form();
+    type(state, "alpha beta gamma");
+    return state;
+  };
+  const press = (state: FormState, name: string, extra: Partial<KeyEvent> = {}): void => {
+    handleFormKey(state, { name, sequence: "", ...extra });
+  };
+
+  test("ctrl motions move by character and line edge", () => {
+    const state = seed();
+    press(state, "a", { ctrl: true });
+    expect(state.cursor).toBe(0);
+    press(state, "f", { ctrl: true });
+    press(state, "f", { ctrl: true });
+    expect(state.cursor).toBe(2);
+    press(state, "e", { ctrl: true });
+    expect(state.cursor).toBe(16);
+    press(state, "b", { ctrl: true });
+    expect(state.cursor).toBe(15);
+    press(state, "home");
+    expect(state.cursor).toBe(0);
+    press(state, "end");
+    expect(state.cursor).toBe(16);
+  });
+
+  test("meta motions move by word", () => {
+    const state = seed();
+    press(state, "b", { meta: true });
+    expect(state.cursor).toBe(11); // start of gamma
+    press(state, "b", { meta: true });
+    expect(state.cursor).toBe(6); // start of beta
+    press(state, "f", { meta: true });
+    expect(state.cursor).toBe(10); // end of beta
+  });
+
+  test("kills edit the intent and re-suggest the branch", () => {
+    const state = seed();
+    press(state, "w", { ctrl: true });
+    expect(state.prompt).toBe("alpha beta ");
+    expect(state.branch).toBe("alpha-beta");
+    press(state, "a", { ctrl: true });
+    press(state, "d", { meta: true });
+    expect(state.prompt).toBe(" beta ");
+    press(state, "e", { ctrl: true });
+    press(state, "u", { ctrl: true });
+    expect(state.prompt).toBe("");
+    expect(state.branch).toBe("");
+  });
+
+  test("delete works forwards and ctrl+h backwards", () => {
+    const state = form();
+    type(state, "abc");
+    press(state, "a", { ctrl: true });
+    press(state, "delete");
+    expect(state.prompt).toBe("bc");
+    press(state, "f", { ctrl: true });
+    press(state, "h", { ctrl: true });
+    expect(state.prompt).toBe("c");
+    expect(state.cursor).toBe(0);
+  });
+
+  test("ctrl+g asks for the editor from any focus", () => {
+    const state = form();
+    expect(handleFormKey(state, { name: "g", ctrl: true, sequence: "" }).kind).toBe("editIntent");
+    state.focus = "harness";
+    expect(handleFormKey(state, { name: "g", ctrl: true, sequence: "" }).kind).toBe("editIntent");
+  });
+});
+
+describe("applyEditedIntent", () => {
+  test("replaces the intent, trims the editor's trailing newline, re-suggests", () => {
+    const state = form();
+    type(state, "old words");
+    applyEditedIntent(state, "Fix the queue\r\nand add a test\n\n");
+    expect(state.prompt).toBe("Fix the queue\nand add a test");
+    expect(state.cursor).toBe(state.prompt.length);
+    expect(state.branch).toBe("fix-the-queue-and-add-a-test");
   });
 });
 
