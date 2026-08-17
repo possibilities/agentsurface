@@ -53,9 +53,12 @@ and re-implements neither.
   the record, and reports failure through a herdr notification.
 - `herdr.ts` speaks the herdr CLI's socket API: workspace/worktree/tab
   create, the surface listings, and agent start (with the pane-busy ready
-  retry). The intent travels as a native token on the launch itself, so a
-  startup dialog cannot drop it. JSON answers only; success on stdout,
-  errors on stderr.
+  retry). The intent rides the launch as an `--x-prompt-file` spool
+  reference — herdr types the command into the pane's shell and refuses
+  control characters, so the text itself cannot travel as an argument;
+  agentlaunch appends the file's text as the final native token, which is
+  why a startup dialog still cannot drop it. The executor prunes the spool
+  by age. JSON answers only; success on stdout, errors on stderr.
 - `catalog.ts` consumes `agentlaunch x-catalog --x-json` — the resolved,
   validated pair space, plus each harness's designated metadata level. The
   TUI can never offer an invalid model:effort.

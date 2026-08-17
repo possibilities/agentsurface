@@ -1,4 +1,12 @@
-import { closeSync, mkdirSync, openSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { UsageError } from "../errors.ts";
 import {
@@ -24,9 +32,9 @@ import type { LaunchPlan } from "./model.ts";
  * away, and a popup closes only when its process exits — so the TUI hands
  * the frozen plan to `agentsurface execute-launch <json>` spawned detached,
  * and exits. The executor creates the workspace or worktree (focused or
- * not, by submit mode), starts the agent with the intent riding the argv,
- * and appends the launch record. With no terminal to report to, a failure
- * goes to a herdr notification.
+ * not, by submit mode), starts the agent with the intent riding the launch
+ * as a spool-file reference, and appends the launch record. With no
+ * terminal to report to, a failure goes to a herdr notification.
  */
 
 export interface DetachedLaunch extends LaunchPlan {
@@ -134,7 +142,10 @@ export async function executeLaunch(
     }
   }
   const primed = primedPrompt(plan);
-  const agentArgs = ["--x-level", plan.level, ...(primed === "" ? [] : [primed])];
+  const agentArgs = ["--x-level", plan.level];
+  if (primed !== "") {
+    agentArgs.push("--x-prompt-file", writeIntentFile(dirname(logPath), primed));
+  }
   const tried = new Set<string>();
   let name = "";
   for (let attempt = 0; ; attempt++) {
@@ -167,6 +178,45 @@ export async function executeLaunch(
     agent: name,
     priming: plan.priming,
   });
+}
+
+/** Herdr types the launch into the pane's interactive shell and refuses
+ * control characters in agent arguments, so a multi-line intent cannot ride
+ * the argv as literal text. It travels as a spool file instead:
+ * agentlaunch's `--x-prompt-file` appends the file's text as the final
+ * native token once the shell boundary is behind it. Agentlaunch never
+ * deletes the file, and the executor cannot know when it was read, so the
+ * spool is pruned by age — one unlink at a time, like the log beside it. */
+export function writeIntentFile(
+  stateDir: string,
+  primed: string,
+  now: number = Date.now(),
+): string {
+  const spool = join(stateDir, "intents");
+  mkdirSync(spool, { recursive: true });
+  pruneIntentSpool(spool, now);
+  const path = join(spool, `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}.txt`);
+  writeFileSync(path, primed);
+  return path;
+}
+
+const INTENT_SPOOL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function pruneIntentSpool(spool: string, now: number): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(spool);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const path = join(spool, entry);
+    try {
+      if (now - statSync(path).mtimeMs > INTENT_SPOOL_MAX_AGE_MS) unlinkSync(path);
+    } catch {
+      // A concurrent executor may have pruned it first; the launch goes on.
+    }
+  }
 }
 
 /** The workspace already hosting a project: one with a pane working inside
