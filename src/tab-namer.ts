@@ -10,8 +10,9 @@ import type { Environ } from "./paths.ts";
  * The plugin's event half: herdr runs `agentsurface name-tab` on every
  * `pane.agent_detected`, and this names the pane's tab after the agent's
  * conversation — once. Herdr's event does not yet know the session, so the
- * pane is polled until its agent_session appears (herdr's integrations
- * report it moments after detection), then the transcript is polled until
+ * pane is polled until its agent_session appears (moments after detection
+ * when the harness starts clean, minutes later when a startup dialog — a
+ * trust prompt, a login — holds it back), then the transcript is polled until
  * it holds a first prompt (exit 4 from `conversation slug` underneath).
  * While polling, the pane's session is re-read each round and the current
  * ref is the one slugged: the name follows the tab's live conversation, so
@@ -236,7 +237,11 @@ export interface TabNamerOptions {
    * longer alive may be taken over. */
   pid?: number;
   pidAlive?: (pid: number) => boolean;
-  /** How long to wait for herdr to learn the pane's session. */
+  /** How long to wait for herdr to learn the pane's session. A harness held
+   * at a startup dialog (a trust prompt, a login) reports no session until
+   * the dialog clears, so this window is sized for dialogs measured in
+   * minutes — the same span as the prompt window — not for the
+   * moments-after-detection happy path. */
   sessionTimeoutMs?: number;
   sessionPollMs?: number;
   /** How long to wait for the conversation's first prompt. */
@@ -249,7 +254,7 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
   const now = options.now ?? Date.now;
   const pid = options.pid ?? process.pid;
   const pidAlive = options.pidAlive ?? processAlive;
-  const sessionTimeoutMs = options.sessionTimeoutMs ?? 90_000;
+  const sessionTimeoutMs = options.sessionTimeoutMs ?? 600_000;
   const sessionPollMs = options.sessionPollMs ?? 1_000;
   const promptTimeoutMs = options.promptTimeoutMs ?? 600_000;
   const promptPollMs = options.promptPollMs ?? 3_000;
