@@ -150,6 +150,18 @@ describe("the cascade", () => {
     expect(currentModel(state).model).toBe("spark");
     expect(currentEffort(state)).toBe("low");
   });
+
+  test("arrows clamp at the list's ends, matching the menus", () => {
+    const state = form();
+    state.focus = "project";
+    handleFormKey(state, key("left"));
+    expect(state.projectIndex).toBe(0);
+    state.focus = "effort";
+    setEffort(state, 4);
+    expect(currentEffort(state)).toBe("max");
+    handleFormKey(state, key("right"));
+    expect(currentEffort(state)).toBe("max");
+  });
 });
 
 describe("direct keys", () => {
@@ -475,6 +487,25 @@ describe("createForm defaults", () => {
       cwd: "/home/u/code/beta/sub/dir",
     });
     expect(state.projects[state.projectIndex]?.display).toBe("~/code/beta");
+  });
+
+  test("the default project leads the list; the rest keep frequency order", () => {
+    const projects: ProjectChoice[] = [
+      { path: "/home/u/code/alpha", display: "~/code/alpha", count: 3 },
+      { path: "/home/u/code/beta", display: "~/code/beta", count: 2 },
+      { path: "/home/u/code/gamma", display: "~/code/gamma", count: 1 },
+    ];
+    const state = createForm({ projects, harnesses: HARNESSES, cwd: "/home/u/code/gamma" });
+    expect(state.projectIndex).toBe(0);
+    expect(state.projects.map((project) => project.display)).toEqual([
+      "~/code/gamma",
+      "~/code/alpha",
+      "~/code/beta",
+    ]);
+    // The first step down from the default is the most-launched other project.
+    state.focus = "project";
+    handleFormKey(state, key("right"));
+    expect(state.projects[state.projectIndex]?.display).toBe("~/code/alpha");
   });
 });
 

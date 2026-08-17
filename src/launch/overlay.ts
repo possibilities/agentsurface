@@ -236,11 +236,13 @@ export function createListOverlay(
         if (item) run(item);
         return true;
       }
-      if (key.name === "up") {
+      // Left/right alias up/down — the form rows' spinner habit carries
+      // into the list, left up it and right down it.
+      if (key.name === "up" || key.name === "left") {
         moveSelection(-1);
         return true;
       }
-      if (key.name === "down") {
+      if (key.name === "down" || key.name === "right") {
         moveSelection(1);
         return true;
       }

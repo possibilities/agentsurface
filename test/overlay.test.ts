@@ -102,6 +102,22 @@ describe("list overlay", () => {
       .find((row) => row.includes("▎"));
     expect(selectedRow).toContain("beta");
 
+    // Left/right alias up/down, the form rows' spinner habit.
+    overlay.handleKey(press("left", { sequence: "" }));
+    await setup.flush();
+    const afterLeft = setup
+      .captureCharFrame()
+      .split("\n")
+      .find((row) => row.includes("▎"));
+    expect(afterLeft).toContain("alpha");
+    overlay.handleKey(press("right", { sequence: "" }));
+    await setup.flush();
+    const afterRight = setup
+      .captureCharFrame()
+      .split("\n")
+      .find((row) => row.includes("▎"));
+    expect(afterRight).toContain("beta");
+
     expect(overlay.handleKey(press("escape", { sequence: "" }))).toBe(true);
     expect(ran).toHaveLength(0);
     expect(overlay.isOpen()).toBe(false);

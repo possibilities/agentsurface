@@ -122,6 +122,14 @@ export function createForm(inputs: {
     if (at >= 0) state.projectIndex = at;
     state.worktree = draft.worktree;
   }
+  // Whatever chose the default project — cwd, draft, or the list head —
+  // it leads the list, so the first step down lands on the most-launched
+  // of the others, with the frequency order intact behind it.
+  if (state.projectIndex > 0) {
+    const chosen = state.projects[state.projectIndex]!;
+    state.projects = [chosen, ...state.projects.filter((_, at) => at !== state.projectIndex)];
+    state.projectIndex = 0;
+  }
   state.focus = "prompt";
   return state;
 }
@@ -192,31 +200,33 @@ function moveFocus(state: FormState, delta: number): void {
   state.focus = FIELD_ORDER[(at + delta + FIELD_ORDER.length) % FIELD_ORDER.length]!;
 }
 
-function wrap(index: number, delta: number, length: number): number {
+function step(index: number, delta: number, length: number): number {
   if (length === 0) return 0;
-  return (index + delta + length) % length;
+  return Math.max(0, Math.min(length - 1, index + delta));
 }
 
-/** Cycle the focused row's value — the arrows' and the wheel's shared verb. */
-export function cycleValue(state: FormState, delta: number): void {
+/** Step the focused row's value — the arrows' and the wheel's shared verb.
+ * Clamped at the ends like the chooser menus, never wrapping: an edge
+ * press stays put instead of teleporting across the list. */
+export function stepValue(state: FormState, delta: number): void {
   switch (state.focus) {
     case "project":
-      state.projectIndex = wrap(state.projectIndex, delta, state.projects.length);
+      state.projectIndex = step(state.projectIndex, delta, state.projects.length);
       return;
     case "worktree":
       toggleWorktree(state);
       return;
     case "harness":
-      setHarness(state, wrap(state.harnessIndex, delta, state.harnesses.length));
+      setHarness(state, step(state.harnessIndex, delta, state.harnesses.length));
       return;
     case "model":
-      setModel(state, wrap(state.modelIndex, delta, currentHarness(state).models.length));
+      setModel(state, step(state.modelIndex, delta, currentHarness(state).models.length));
       return;
     case "effort":
-      setEffort(state, wrap(state.effortIndex, delta, currentModel(state).efforts.length));
+      setEffort(state, step(state.effortIndex, delta, currentModel(state).efforts.length));
       return;
     case "priming":
-      setPriming(state, wrap(state.primingIndex, delta, state.primingOptions.length));
+      setPriming(state, step(state.primingIndex, delta, state.primingOptions.length));
       return;
     default:
       return;
@@ -350,12 +360,12 @@ export function handleRowPress(state: FormState, field: Field | null): FormActio
   return { kind: "choose", field };
 }
 
-/** A wheel gesture over a row focuses it and cycles its value — the
+/** A wheel gesture over a row focuses it and steps its value — the
  * arrows' verb at the pointer. */
 export function handleRowScroll(state: FormState, field: Field | null, delta: number): void {
   if (state.phase.kind !== "form" || field === null || field === "prompt") return;
   state.focus = field;
-  cycleValue(state, delta);
+  stepValue(state, delta);
 }
 
 export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
@@ -401,14 +411,15 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
   // to the intent textarea, which owns them.
   if (state.focus === "prompt") return { kind: "none" };
 
-  // Select rows: arrows cycle; space, and the palette's advertised letters,
-  // act directly — the textarea consumed its printables already.
+  // Select rows: arrows step, left up the menu's order and right down it;
+  // space, and the palette's advertised letters, act directly — the
+  // textarea consumed its printables already.
   if (name === "left") {
-    cycleValue(state, -1);
+    stepValue(state, -1);
     return { kind: "none" };
   }
   if (name === "right") {
-    cycleValue(state, 1);
+    stepValue(state, 1);
     return { kind: "none" };
   }
   if (key.sequence === " " || name === "space") {

@@ -30,8 +30,9 @@ optional), then confirm the rest.
 - **Project** — the configured roots themselves plus the directories one
   level under them, ordered by
   how often you have launched into them (alphabetical until then), and
-  preselected from the pane the launcher opened over. Space or `p` opens the
-  filterable picker.
+  preselected from the pane the launcher opened over — that default leads
+  the list, so the first step down is your most-launched other project.
+  Space or `p` opens the filterable picker.
 - **Worktree** — off by default; `w` toggles. On, herdr creates a new git
   worktree for the project (branch name suggested from the intent, editable)
   and opens it as its own workspace.

@@ -42,7 +42,7 @@ and re-implements neither.
   second focus path means the renderer routes every key twice. The body
   is one renderable per form row so rows are pointer targets: a press
   runs the row's primary action (chooser, toggle, intent focus), the
-  wheel cycles the value, and a press outside an open overlay dismisses
+  wheel steps the value, and a press outside an open overlay dismisses
   it. `launch/theme.ts` holds the Signal Room tokens;
   `launch/overlay.ts` is the palette anatomy, generalized one notch into
   the five choosers.
