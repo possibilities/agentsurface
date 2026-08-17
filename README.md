@@ -2,7 +2,7 @@
 
 AgentSurface ties the `~/code/agent*` fleet to [herdr](https://github.com/wilkystyle/herdr),
 the terminal workspace manager fleet agents run inside. Each subcommand is
-one integration; the first is `launch`.
+one integration; the first is `launch`, the second `conversation slug`.
 
 ## Launch
 
@@ -62,6 +62,27 @@ description = "launch an agent"
 width = "80%"
 height = "80%"
 ```
+
+## Conversation slug
+
+```sh
+agentsurface conversation slug <harness> <session-id-or-path>
+```
+
+Prints a short list-ready slug for any claude, codex, or pi conversation —
+`build-agentsurface-launch-tui` — derived from its first substantive user
+prompt: housekeeping commands are skipped, a leading slash command and its
+`--flags` are stripped, valid `@path` mentions are replaced by the files
+they name (resolved against the conversation's own working directory), and
+the middle of a long prompt is cut before the conversation's own harness
+condenses it at the catalog's designated cheap metadata level. Exit `3`
+means no such transcript, `4` a transcript with no user prompt yet, so
+callers can poll a conversation that has not started.
+
+The repository also ships a herdr plugin (`plugin/`, linked by agentstart's
+installer) that puts the slug to work: when herdr detects an agent in a
+pane, the pane's tab is renamed after the agent's conversation — once per
+tab, quietly skipping anything that never produces a prompt.
 
 ## Install
 
