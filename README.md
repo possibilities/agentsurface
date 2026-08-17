@@ -14,10 +14,12 @@ One screen, prompt-first: type what you want done (or don't — the intent is
 optional), then confirm the rest.
 
 - **Intent** — the prompt at the top; it rides the launch as the agent's
-  first prompt. The field speaks readline (ctrl+a/e/b/f, alt+b/f/d,
-  ctrl+w/u/d/h, home/end/delete), and ctrl+g opens the intent in `$EDITOR`
-  (`$VISUAL` first) the way the harnesses do — newlines survive the round
-  trip. Enter moves on to the configuration rows.
+  first prompt. The field is a real line editor (OpenTUI's textarea):
+  readline motions and kills (ctrl+a/e/b/f, alt+b/f, ctrl+w/u, alt+d),
+  selection, undo, and paste all behave; shift+enter or ctrl+j insert a
+  newline; ctrl+g opens the intent in `$EDITOR` (`$VISUAL` first) the way
+  the harnesses do. Enter moves on to the configuration rows; ctrl+k stays
+  the command palette everywhere.
 - **Project** — directories one level under the configured roots, ordered by
   how often you have launched into them (alphabetical until then), and
   preselected from the pane the launcher opened over. Space or `p` opens the

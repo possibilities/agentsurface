@@ -29,10 +29,12 @@ and re-implements neither.
   without a terminal is decided here, where tests reach it. Defaults come
   from the world: the project from the focused pane's cwd, the cascade from
   the last launch where the catalog still allows it.
-- `launch/app.ts` is the thin OpenTUI shell over the model.
-  `launch/theme.ts` holds the Signal Room tokens; `launch/overlay.ts` is
-  the palette anatomy, generalized one notch into the four choosers
-  (project, harness, model, effort).
+- `launch/app.ts` is the thin OpenTUI shell over the model. The intent
+  field is OpenTUI's Textarea, driven by ONE manual dispatch — never
+  `focus()` it, or the renderer adds its own routing and every key lands
+  twice; `showCursor` alone carries the focus visual. `launch/theme.ts`
+  holds the Signal Room tokens; `launch/overlay.ts` is the palette
+  anatomy, generalized one notch into the four choosers.
 - `launch/executor.ts` is the detached half: submitting must close the
   popup at once, and a popup closes only with its process — so the TUI
   spawns `agentsurface execute-launch <plan-json>` detached and exits (or,

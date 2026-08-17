@@ -9,7 +9,6 @@ import { orderProjects, scanProjects } from "../projects.ts";
 import { launchLogPath, readLastLaunch, readLaunchCounts } from "../state.ts";
 import { spawnDetachedLaunch } from "./executor.ts";
 import {
-  applyEditedIntent,
   buildFormLines,
   buildPlan,
   type ChooseField,
@@ -18,7 +17,7 @@ import {
   currentModel,
   failRun,
   handleFormKey,
-  pasteIntoIntent,
+  normalizeEditedIntent,
   resetForAnother,
   setEffort,
   setHarness,
@@ -76,13 +75,54 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     id: "launch-frame",
     width: "100%",
     flexGrow: 1,
+    flexDirection: "column",
     paddingTop: 1,
     paddingBottom: 1,
     paddingLeft: 2,
     paddingRight: 2,
     backgroundColor: SIGNAL_ROOM.canvas,
   });
-  const body = new core.TextRenderable(renderer, { id: "launch-body" });
+  // The intent block: an amber input rail beside OpenTUI's own textarea —
+  // a real line editor (word motions, kills, selection, undo, paste).
+  const promptRow = new core.BoxRenderable(renderer, {
+    id: "launch-intent-row",
+    width: "100%",
+    flexDirection: "row",
+    flexShrink: 0,
+    backgroundColor: SIGNAL_ROOM.canvas,
+  });
+  const rail = new core.TextRenderable(renderer, {
+    id: "launch-intent-rail",
+    content: GLYPHS.inputRail,
+    fg: SIGNAL_ROOM.local,
+    width: 2,
+  });
+  const intent = new core.TextareaRenderable(renderer, {
+    id: "launch-intent",
+    flexGrow: 1,
+    minHeight: 1,
+    height: 1,
+    wrapMode: "word",
+    backgroundColor: SIGNAL_ROOM.canvas,
+    focusedBackgroundColor: SIGNAL_ROOM.canvas,
+    textColor: SIGNAL_ROOM.text,
+    focusedTextColor: SIGNAL_ROOM.text,
+    cursorColor: SIGNAL_ROOM.accent,
+    placeholder: `describe the work${GLYPHS.ellipsis}`,
+    placeholderColor: SIGNAL_ROOM.muted,
+    // Plain enter leaves the field (the shell routes it); shift+enter and
+    // ctrl+j are the explicit newline spellings — ctrl+j needs its kitty
+    // spelling beside the default map's legacy `linefeed`.
+    keyBindings: [
+      ...core.defaultTextareaKeyBindings,
+      { name: "return", shift: true, action: "newline" },
+      { name: "j", ctrl: true, action: "newline" },
+    ],
+  });
+  promptRow.add(rail);
+  promptRow.add(intent);
+  frame.add(promptRow);
+  const body = new core.TextRenderable(renderer, { id: "launch-body", marginTop: 1 });
   frame.add(body);
   root.add(frame);
 
@@ -123,13 +163,8 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     for (const line of lines) {
       for (const part of line) {
         if (part.text.length === 0) continue;
-        let chunk: ReturnType<typeof core.bold>;
-        if (part.cursor === true) {
-          chunk = core.bg(SIGNAL_ROOM.accent)(core.fg(SIGNAL_ROOM.canvas)(part.text));
-        } else {
-          chunk = core.fg(SIGNAL_ROOM[part.token])(part.text);
-          if (part.bold === true) chunk = core.bold(chunk);
-        }
+        let chunk = core.fg(SIGNAL_ROOM[part.token])(part.text);
+        if (part.bold === true) chunk = core.bold(chunk);
         chunks.push(chunk);
       }
       chunks.push(core.fg(SIGNAL_ROOM.text)("\n"));
@@ -230,10 +265,24 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     { id: "quit", key: "ESC", label: "quit without launching", onRun: () => shutdown(0) },
   ];
 
+  // Never intent.focus(): the renderer would then dispatch keys to it on
+  // its own, doubling the shell's single manual dispatch. The cursor flag
+  // alone carries the focus visual.
+  const syncIntent = (): void => {
+    const promptFocused = state.focus === "prompt" && state.phase.kind === "form";
+    // lineInfo reports the native wrap layout independent of the current
+    // height (virtualLineCount is viewport-capped and cannot grow it).
+    const intentRows = Math.max(1, Math.min(8, intent.lineInfo.lineWraps.length));
+    intent.height = intentRows;
+    rail.content = Array.from({ length: intentRows }, () => GLYPHS.inputRail).join("\n");
+    intent.showCursor = promptFocused;
+  };
+
   const paint = (): void => {
     const columns = process.stdout.columns ?? 80;
     const rows = renderer.height || process.stdout.rows || 24;
     const width = Math.max(36, columns - 4);
+    syncIntent();
     body.content = linesToStyled(buildFormLines(state, width));
     commands.update({ width: columns, height: rows, items: commandItems() });
     for (const field of ["project", "harness", "model", "effort"] as const) {
@@ -258,7 +307,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     const file = join(tmpdir(), `agentsurface-intent-${process.pid}-${Date.now()}.md`);
     let outcome: { kind: "edited"; text: string } | { kind: "unchanged" } | { kind: "unrunnable" };
     try {
-      await Bun.write(file, state.prompt);
+      await Bun.write(file, intent.plainText);
       renderer.suspend();
       try {
         const proc = Bun.spawn(["/bin/sh", "-c", `${editor} "$1"`, "sh", file], {
@@ -286,7 +335,8 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     }
     editing = false;
     if (outcome.kind === "edited") {
-      applyEditedIntent(state, outcome.text);
+      intent.setText(normalizeEditedIntent(outcome.text));
+      state.prompt = intent.plainText;
       state.focus = "prompt";
     } else if (outcome.kind === "unchanged") {
       state.notice = { text: "editor exited nonzero · intent unchanged", tone: "warn" };
@@ -300,6 +350,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
    * the operator an immediate close (or, unfocused, the next blank form). */
   const submitLaunch = (focus: boolean): void => {
     if (state.phase.kind !== "form") return;
+    state.prompt = intent.plainText;
     const plan = buildPlan(state);
     if (plan === null) {
       paint();
@@ -320,15 +371,18 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       state,
       `started ${plan.harness} ${GLYPHS.sep} ${plan.project.display}${plan.worktree ? ` ${GLYPHS.sep} worktree` : ""}`,
     );
+    intent.setText("");
     paint();
   };
 
-  renderer.keyInput.on("paste", (event: { bytes: Uint8Array }) => {
+  renderer.keyInput.on("paste", (event) => {
     if (editing) return;
     const anyOverlayOpen =
       commands.isOpen() || Object.values(choosers).some((overlay) => overlay.isOpen());
     if (anyOverlayOpen) return;
-    pasteIntoIntent(state, new TextDecoder().decode(event.bytes));
+    if (state.focus !== "prompt" || state.phase.kind !== "form") return;
+    intent.handlePaste(event);
+    state.prompt = intent.plainText;
     paint();
   });
 
@@ -354,6 +408,24 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     if (key.ctrl && key.name === "k") {
       commands.open();
       return;
+    }
+    // Prompt-focused, the textarea owns editing; only the form's structural
+    // keys — leave, advance, quit, editor — go to the model. shift+enter
+    // stays with the textarea as an explicit newline.
+    if (state.focus === "prompt" && state.phase.kind === "form") {
+      const name = key.name;
+      const structural =
+        name === "escape" ||
+        name === "tab" ||
+        name === "backtab" ||
+        ((name === "return" || name === "enter") && key.shift !== true) ||
+        (key.ctrl === true && name === "g");
+      if (!structural) {
+        intent.handleKeyPress(key);
+        state.prompt = intent.plainText;
+        paint();
+        return;
+      }
     }
     const action = handleFormKey(state, key);
     switch (action.kind) {

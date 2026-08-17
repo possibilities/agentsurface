@@ -30,9 +30,8 @@ function rows(state: FormState, width: number): string[] {
 }
 
 describe("buildFormLines", () => {
-  test("shows the invitation, the fact rows, and the cascade", () => {
+  test("shows the fact rows and the cascade", () => {
     const text = rows(form(), 76).join("\n");
-    expect(text).toContain("describe the work");
     expect(text).toContain("project");
     expect(text).toContain("~/code/alpha");
     expect(text).not.toContain("3×"); // frequency orders the list, unshown
@@ -60,10 +59,7 @@ describe("buildFormLines", () => {
 
   test("no row exceeds the frame at the contract widths", () => {
     for (const width of [36, 76, 96]) {
-      const state = form();
-      state.prompt = "a longer intent that certainly wraps at the narrow widths ".repeat(3);
-      state.cursor = state.prompt.length;
-      for (const row of rows(state, width)) {
+      for (const row of rows(form(), width)) {
         expect(row.length).toBeLessThanOrEqual(width);
       }
     }
@@ -86,26 +82,9 @@ describe("buildFormLines", () => {
     expect(text).toContain("ESC QUIT · ⏎ BACK");
   });
 
-  test("the cursor overlays its character instead of displacing the text", () => {
+  test("the intent renders no line here — the textarea above owns it", () => {
     const state = form();
-    state.prompt = "abc";
-    state.cursor = 1;
-    const lines = buildFormLines(state, 76);
-    const first = lines[0]!;
-    // The row's text is exactly the prompt — no inserted cursor glyph.
-    expect(first.map((span) => span.text).join("")).toBe("│ abc");
-    const cursor = first.find((span) => span.cursor === true);
-    expect(cursor?.text).toBe("b");
-  });
-
-  test("newlines from the editor break rows; the cursor rides its line", () => {
-    const state = form();
-    state.prompt = "one\ntwo";
-    state.cursor = 3; // on the newline: end of the first line
-    const lines = rows(state, 76);
-    expect(lines[0]).toBe("│ one ");
-    expect(lines[1]).toBe("│ two");
-    const cursor = buildFormLines(state, 76)[0]!.find((span) => span.cursor === true);
-    expect(cursor?.text).toBe(" ");
+    state.prompt = "words that must not appear in the fact rows";
+    expect(rows(state, 76).join("\n")).not.toContain("words that must not appear");
   });
 });

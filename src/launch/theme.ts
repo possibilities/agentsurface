@@ -26,9 +26,6 @@ export interface Span {
   text: string;
   token: TokenName;
   bold?: boolean;
-  /** Rendered as the block cursor: accent ground under canvas ink. The
-   * cursor overlays its character rather than displacing it. */
-  cursor?: boolean;
 }
 
 export type Line = readonly Span[];

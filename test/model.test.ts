@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { LaunchHarness } from "../src/catalog.ts";
 import {
-  applyEditedIntent,
   buildPlan,
   createForm,
   currentEffort,
@@ -11,7 +10,7 @@ import {
   failRun,
   handleFormKey,
   type KeyEvent,
-  pasteIntoIntent,
+  normalizeEditedIntent,
   resetForAnother,
   setEffort,
   setHarness,
@@ -58,12 +57,6 @@ function key(name: string, extra: Partial<KeyEvent> = {}): KeyEvent {
   return { name, sequence: name.length === 1 ? name : "", ...extra };
 }
 
-function type(state: FormState, text: string): void {
-  for (const character of text) {
-    handleFormKey(state, { name: character, sequence: character });
-  }
-}
-
 describe("createForm", () => {
   test("starts at the prompt with the harness's catalog defaults", () => {
     const state = form();
@@ -75,26 +68,11 @@ describe("createForm", () => {
 });
 
 describe("the prompt", () => {
-  test("typing feeds the intent", () => {
+  test("editing keys are the textarea's, not the model's", () => {
     const state = form();
-    type(state, "Fix the bug");
-    expect(state.prompt).toBe("Fix the bug");
-  });
-
-  test("cursor editing inserts and deletes at the cursor", () => {
-    const state = form();
-    type(state, "abd");
-    handleFormKey(state, key("left"));
-    type(state, "c");
-    expect(state.prompt).toBe("abcd");
-    handleFormKey(state, key("backspace"));
-    expect(state.prompt).toBe("abd");
-  });
-
-  test("a paste with newlines lands as one spaced line", () => {
-    const state = form();
-    handleFormKey(state, { name: "", sequence: "one\ntwo" });
-    expect(state.prompt).toBe("one two");
+    expect(handleFormKey(state, key("x")).kind).toBe("none");
+    expect(handleFormKey(state, key("backspace")).kind).toBe("none");
+    expect(state.prompt).toBe("");
   });
 });
 
@@ -185,8 +163,7 @@ describe("direct keys", () => {
     state.focus = "model";
     expect(handleFormKey(state, key("a")).kind).toBe("launchAnother");
     state.focus = "prompt";
-    type(state, "ahme");
-    expect(state.prompt).toBe("ahme");
+    expect(handleFormKey(state, key("a")).kind).toBe("none");
   });
 
   test("the picker setters apply the cascade snapping", () => {
@@ -203,7 +180,7 @@ describe("direct keys", () => {
     expect(state.focus as string).toBe("model");
   });
 
-  test("w toggles the worktree from a select row, not from text", () => {
+  test("w toggles the worktree from a select row, never from the prompt", () => {
     const state = form();
     state.focus = "harness";
     handleFormKey(state, key("w"));
@@ -211,14 +188,13 @@ describe("direct keys", () => {
     state.focus = "prompt";
     handleFormKey(state, key("w"));
     expect(state.worktree).toBe(true);
-    expect(state.prompt).toBe("w");
   });
 });
 
 describe("buildPlan", () => {
   test("freezes the launch with the level as one value", () => {
     const state = form();
-    type(state, "Fix the bug");
+    state.prompt = "Fix the bug";
     const plan = buildPlan(state);
     expect(plan).not.toBeNull();
     expect(plan?.level).toBe("opus:medium");
@@ -252,68 +228,8 @@ describe("failed phase", () => {
   });
 });
 
-describe("readline editing", () => {
-  const seed = (): FormState => {
-    const state = form();
-    type(state, "alpha beta gamma");
-    return state;
-  };
-  const press = (state: FormState, name: string, extra: Partial<KeyEvent> = {}): void => {
-    handleFormKey(state, { name, sequence: "", ...extra });
-  };
-
-  test("ctrl motions move by character and line edge", () => {
-    const state = seed();
-    press(state, "a", { ctrl: true });
-    expect(state.cursor).toBe(0);
-    press(state, "f", { ctrl: true });
-    press(state, "f", { ctrl: true });
-    expect(state.cursor).toBe(2);
-    press(state, "e", { ctrl: true });
-    expect(state.cursor).toBe(16);
-    press(state, "b", { ctrl: true });
-    expect(state.cursor).toBe(15);
-    press(state, "home");
-    expect(state.cursor).toBe(0);
-    press(state, "end");
-    expect(state.cursor).toBe(16);
-  });
-
-  test("meta motions move by word", () => {
-    const state = seed();
-    press(state, "b", { meta: true });
-    expect(state.cursor).toBe(11); // start of gamma
-    press(state, "b", { meta: true });
-    expect(state.cursor).toBe(6); // start of beta
-    press(state, "f", { meta: true });
-    expect(state.cursor).toBe(10); // end of beta
-  });
-
-  test("kills edit the intent", () => {
-    const state = seed();
-    press(state, "w", { ctrl: true });
-    expect(state.prompt).toBe("alpha beta ");
-    press(state, "a", { ctrl: true });
-    press(state, "d", { meta: true });
-    expect(state.prompt).toBe(" beta ");
-    press(state, "e", { ctrl: true });
-    press(state, "u", { ctrl: true });
-    expect(state.prompt).toBe("");
-  });
-
-  test("delete works forwards and ctrl+h backwards", () => {
-    const state = form();
-    type(state, "abc");
-    press(state, "a", { ctrl: true });
-    press(state, "delete");
-    expect(state.prompt).toBe("bc");
-    press(state, "f", { ctrl: true });
-    press(state, "h", { ctrl: true });
-    expect(state.prompt).toBe("c");
-    expect(state.cursor).toBe(0);
-  });
-
-  test("ctrl+g asks for the editor from any focus", () => {
+describe("ctrl+g", () => {
+  test("asks for the editor from any focus", () => {
     const state = form();
     expect(handleFormKey(state, { name: "g", ctrl: true, sequence: "" }).kind).toBe("editIntent");
     state.focus = "harness";
@@ -321,27 +237,12 @@ describe("readline editing", () => {
   });
 });
 
-describe("applyEditedIntent", () => {
-  test("replaces the intent, trims the editor's trailing newline, re-suggests", () => {
-    const state = form();
-    type(state, "old words");
-    applyEditedIntent(state, "Fix the queue\r\nand add a test\n\n");
-    expect(state.prompt).toBe("Fix the queue\nand add a test");
-    expect(state.cursor).toBe(state.prompt.length);
-  });
-});
-
-describe("pasteIntoIntent", () => {
-  test("inserts at the cursor, prompt-focused only, newlines kept", () => {
-    const state = form();
-    type(state, "ab");
-    state.cursor = 1;
-    pasteIntoIntent(state, "one\r\ntwo");
-    expect(state.prompt).toBe("aone\ntwob");
-    expect(state.cursor).toBe(8);
-    state.focus = "harness";
-    pasteIntoIntent(state, "ignored");
-    expect(state.prompt).toBe("aone\ntwob");
+describe("normalizeEditedIntent", () => {
+  test("normalizes line endings and trims the editor's trailing newline", () => {
+    expect(normalizeEditedIntent("Fix the queue\r\nand add a test\n\n")).toBe(
+      "Fix the queue\nand add a test",
+    );
+    expect(normalizeEditedIntent("")).toBe("");
   });
 });
 
@@ -390,7 +291,7 @@ describe("createForm defaults", () => {
 describe("resetForAnother", () => {
   test("clears the intent, keeps the config, and confirms", () => {
     const state = form();
-    type(state, "First launch");
+    state.prompt = "First launch";
     state.worktree = true;
     setHarness(state, 1);
     resetForAnother(state, "started codex · ~/code/alpha");
