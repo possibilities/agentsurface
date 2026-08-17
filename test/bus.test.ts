@@ -61,6 +61,8 @@ function surface(
   options: {
     promptStatus?: string;
     promptError?: { code: string; message: string };
+    /** Fail only the first N prompt attempts; permanent when omitted. */
+    promptErrorTimes?: number;
     agents?: unknown[];
     tabs?: unknown[];
     paneSession?: string | null;
@@ -97,7 +99,13 @@ function surface(
     }
     if (args[0] === "agent" && args[1] === "prompt") {
       fake.prompts.push(args.slice(2));
-      if (options.promptError !== undefined) return { error: options.promptError };
+      const promptError = options.promptError;
+      if (
+        promptError !== undefined &&
+        (options.promptErrorTimes === undefined || fake.prompts.length <= options.promptErrorTimes)
+      ) {
+        return { error: promptError };
+      }
       return { result: { agent: { agent_status: options.promptStatus ?? "working" } } };
     }
     throw new Error(`unexpected herdr call: ${args.join(" ")}`);
@@ -326,5 +334,68 @@ describe("runMessage", () => {
 
   test("outside a herdr pane the bus refuses", async () => {
     await expectCliError(runMessage(surface().call, {}, "planner", "hello"), "bus_outside_pane");
+  });
+
+  test("without --wait-unblocked the recovery names the flag", async () => {
+    const fake = surface({ promptError: { code: "agent_blocked", message: "blocked" } });
+    const error = await expectCliError(
+      runMessage(fake.call, SENDER_ENV, "planner", "hello"),
+      "bus_target_blocked",
+    );
+    expect(fake.prompts.length).toBe(1);
+    expect(error.recovery).toContain("--wait-unblocked");
+  });
+
+  test("--wait-unblocked retries a blocked target and delivers once it clears", async () => {
+    const fake = surface({
+      promptError: { code: "agent_blocked", message: "blocked" },
+      promptErrorTimes: 2,
+      promptStatus: "idle",
+    });
+    let clock = 0;
+    const confirmation = await runMessage(fake.call, SENDER_ENV, "planner", "hello", {
+      waitUnblocked: true,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+    expect(fake.prompts.length).toBe(3);
+    expect(confirmation).toContain("while idle");
+  });
+
+  test("--wait-unblocked also outlasts a briefly not-ready target", async () => {
+    const fake = surface({
+      promptError: { code: "agent_not_ready", message: "not ready" },
+      promptErrorTimes: 1,
+    });
+    let clock = 0;
+    await runMessage(fake.call, SENDER_ENV, "planner", "hello", {
+      waitUnblocked: true,
+      now: () => clock,
+      sleep: async (ms) => {
+        clock += ms;
+      },
+    });
+    expect(fake.prompts.length).toBe(2);
+  });
+
+  test("--wait-unblocked reports honestly at the deadline", async () => {
+    const fake = surface({ promptError: { code: "agent_blocked", message: "blocked" } });
+    let clock = 0;
+    const error = await expectCliError(
+      runMessage(fake.call, SENDER_ENV, "planner", "hello", {
+        waitUnblocked: true,
+        timeoutMs: 5_000,
+        now: () => clock,
+        sleep: async (ms) => {
+          clock += ms;
+        },
+      }),
+      "bus_target_blocked",
+    );
+    expect(fake.prompts.length).toBeGreaterThan(1);
+    expect(error.message).toContain("after waiting 5s");
+    expect(error.message).toContain("not delivered");
   });
 });

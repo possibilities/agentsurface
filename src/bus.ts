@@ -171,11 +171,24 @@ export async function runAgents(
   return renderBusAgents(scoped, { home, workspaceLabels });
 }
 
+export interface MessageOptions {
+  /** Linger and retry a blocked or not-ready target until the deadline,
+   * instead of failing on the first rejection. */
+  waitUnblocked?: boolean;
+  timeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+}
+
+const WAIT_POLL_MS = 2_000;
+export const DEFAULT_WAIT_TIMEOUT_MS = 120_000;
+
 export async function runMessage(
   call: HerdrCall,
   env: Environ,
   target: string,
   text: string,
+  options: MessageOptions = {},
 ): Promise<string> {
   const paneId = env["HERDR_PANE_ID"];
   if (paneId === undefined || paneId === "") {
@@ -218,24 +231,42 @@ export async function runMessage(
     sessionId: pane.sessionValue,
   };
   const agent = resolution.agent;
+  const waitUnblocked = options.waitUnblocked ?? false;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
+  const sleep = options.sleep ?? Bun.sleep;
+  const now = options.now ?? Date.now;
+  const deadline = now() + timeoutMs;
+  const composed = composeBusMessage(sender, text);
+  // The delivery attempt is the probe: herdr rejects a blocked or not-ready
+  // target before writing, so retrying the prompt itself leaves no gap
+  // between observing the state and delivering into it.
   let delivered: { status: string };
-  try {
-    delivered = await promptAgent(call, agent.paneId, composeBusMessage(sender, text));
-  } catch (error) {
-    if (error instanceof HerdrError && error.code === "agent_blocked") {
-      throw new CliError(
-        "bus_target_blocked",
-        `agent "${agent.name}" is blocked on interactive input; the message was not delivered`,
-        "the pane needs the operator before it can take a message",
-      );
-    }
-    if (error instanceof HerdrError && error.code === "agent_not_ready") {
+  for (;;) {
+    try {
+      delivered = await promptAgent(call, agent.paneId, composed);
+      break;
+    } catch (error) {
+      const code = error instanceof HerdrError ? error.code : null;
+      if (code !== "agent_blocked" && code !== "agent_not_ready") throw error;
+      if (waitUnblocked && now() < deadline) {
+        await sleep(WAIT_POLL_MS);
+        continue;
+      }
+      const waited = waitUnblocked ? ` after waiting ${Math.round(timeoutMs / 1000)}s` : "";
+      if (code === "agent_blocked") {
+        throw new CliError(
+          "bus_target_blocked",
+          `agent "${agent.name}" is blocked on interactive input${waited}; the message was not delivered`,
+          waitUnblocked
+            ? "a blocked agent is waiting on the operator; more waiting may not free it"
+            : "the pane needs the operator before it can take a message; --wait-unblocked lingers and retries",
+        );
+      }
       throw new CliError(
         "bus_target_not_ready",
-        `agent "${agent.name}" is not ready for input; the message was not delivered`,
+        `agent "${agent.name}" is not ready for input${waited}; the message was not delivered`,
       );
     }
-    throw error;
   }
   const described = [agent.sessionId ?? agent.paneId, agent.harness ?? "unknown"];
   return `delivered to "${agent.name}" (${described.join(", ")})${deliveryNote(delivered.status)}`;

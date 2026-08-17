@@ -71,7 +71,11 @@ and re-implements neither.
   and delivers through `herdr agent prompt`, behind a prefix naming the
   sender (identity from the pane env herdr exports). The prompt response's
   fresh status becomes the confirmation's delivery note: a working target
-  queued the message behind its turn; a blocked one rejected it.
+  queued the message behind its turn; a blocked one rejected it — the
+  caller decides whether to linger (`--wait-unblocked`, the delivery
+  attempt as the probe, retried until `--timeout`). There is deliberately
+  no deliver-later queue. `skills/bus/SKILL.md` is the runbook agents
+  load; agentstart's skills scan installs it.
 - `catalog.ts` consumes `agentlaunch x-catalog --x-json` — the resolved,
   validated pair space, plus each harness's designated metadata level. The
   TUI can never offer an invalid model:effort.

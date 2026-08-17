@@ -115,8 +115,11 @@ the receiving harness treats it exactly like an operator message.
 Delivery is not receipt: the confirmation reports the target's status — a
 `working` agent queued the message behind its current turn; a `blocked`
 agent (stuck on an interactive dialog) rejects it, and the CLI says the
-message was not delivered. Both commands need to run from inside a herdr
-pane, where herdr's exported `HERDR_PANE_ID` identifies the sender.
+message was not delivered. `--wait-unblocked` lingers and retries a
+blocked target until `--timeout` (default 120s) instead; there is
+deliberately no deliver-later queue. Both commands need to run from
+inside a herdr pane, where herdr's exported `HERDR_PANE_ID` identifies
+the sender.
 
 ## Install
 

@@ -120,13 +120,48 @@ async function main(argv: string[]): Promise<number> {
         console.log(await runAgents(createHerdrCall(env), env, env["HOME"] ?? "", all));
         return 0;
       }
-      const [, target, text] = argv;
-      if (target === undefined || text === undefined || text === "" || argv.length > 3) {
-        console.error('message takes a target and one text argument: message <target> "<text>"');
+      const usage =
+        'message takes a target and one text argument: message <target> "<text>" [--wait-unblocked] [--timeout <ms>]';
+      const positionals: string[] = [];
+      let waitUnblocked = false;
+      let timeoutMs: number | undefined;
+      const rest = argv.slice(1);
+      for (let index = 0; index < rest.length; index += 1) {
+        const arg = rest[index] as string;
+        if (arg === "--wait-unblocked") {
+          waitUnblocked = true;
+        } else if (arg === "--timeout") {
+          const value = Number(rest[index + 1]);
+          if (!Number.isInteger(value) || value <= 0) {
+            console.error("--timeout takes a positive integer of milliseconds");
+            return 2;
+          }
+          timeoutMs = value;
+          index += 1;
+        } else if (arg.startsWith("--")) {
+          console.error(`unknown option "${arg}"`);
+          console.error(usage);
+          return 2;
+        } else {
+          positionals.push(arg);
+        }
+      }
+      const [target, text] = positionals;
+      if (target === undefined || text === undefined || text === "" || positionals.length > 2) {
+        console.error(usage);
         console.error(TOP_HELP);
         return 2;
       }
-      console.log(await runMessage(createHerdrCall(process.env), process.env, target, text));
+      if (timeoutMs !== undefined && !waitUnblocked) {
+        console.error("--timeout requires --wait-unblocked");
+        return 2;
+      }
+      console.log(
+        await runMessage(createHerdrCall(process.env), process.env, target, text, {
+          waitUnblocked,
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        }),
+      );
       return 0;
     } catch (error) {
       if (error instanceof CliError) {

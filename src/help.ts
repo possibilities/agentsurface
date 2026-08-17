@@ -6,7 +6,7 @@ Usage:
   agentsurface launch
   agentsurface conversation slug <harness> <session-id-or-path>
   agentsurface agents [--all]
-  agentsurface message <target> "<text>"
+  agentsurface message <target> "<text>" [--wait-unblocked] [--timeout <ms>]
   agentsurface --help | --version
 
 Commands:
@@ -25,7 +25,9 @@ Commands:
   message   Send text to another agent over the message bus. The target is a
             name or a session id; herdr types the message into the target's
             harness like an operator message, behind a prefix naming the
-            sender. A working target queues it; a blocked target rejects it.
+            sender. A working target queues it; a blocked target rejects it
+            (--wait-unblocked lingers and retries until --timeout, 120s
+            default, then reports the message undelivered).
 
 Keys in the launcher:
   ctrl+k opens the command palette; every action lives there.
