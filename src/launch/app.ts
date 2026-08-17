@@ -197,7 +197,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     textColor: SIGNAL_ROOM.text,
     focusedTextColor: SIGNAL_ROOM.text,
     cursorColor: SIGNAL_ROOM.accent,
-    placeholder: `describe the work${GLYPHS.ellipsis}`,
+    placeholder: `Enter prompt${GLYPHS.ellipsis}`,
     placeholderColor: SIGNAL_ROOM.muted,
     // Plain enter submits (the form advances); shift+enter and ctrl+j are
     // the newline spellings — ctrl+j needs its kitty spelling beside the
