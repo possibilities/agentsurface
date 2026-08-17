@@ -4,6 +4,7 @@ export const TOP_HELP = `agentsurface — fleet integrations over the herdr surf
 
 Usage:
   agentsurface launch
+  agentsurface conversation slug <harness> <session-id-or-path>
   agentsurface --help | --version
 
 Commands:
@@ -11,6 +12,11 @@ Commands:
             worktree, and the harness/model/effort cascade from agentlaunch's
             catalog; agentsurface creates a herdr workspace (or worktree),
             starts the balanced agent there, and submits the intent.
+  conversation slug
+            Print a short list-ready slug for a conversation, derived from
+            its first user prompt by the conversation's own harness (claude,
+            codex, or pi) at the catalog's metadata level. Exit 3: no such
+            transcript; exit 4: transcript holds no user prompt yet.
 
 Keys in the launcher:
   ctrl+k opens the command palette; every action lives there.

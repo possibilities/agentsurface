@@ -4,7 +4,10 @@ AgentSurface is the fleet's integration point with herdr, the launch surface:
 each subcommand ties `~/code/agent*` tools to the running herdr session. The
 first integration is `launch` — a one-screen, prompt-first TUI that creates a
 herdr workspace (or worktree), starts a balanced agent there through the
-fleet's launch policy, and submits the typed intent.
+fleet's launch policy, and submits the typed intent. The second is
+`conversation slug` — a short list-ready name for any conversation, derived
+from its first user prompt by the conversation's own harness at the
+catalog's metadata level.
 
 The boundary is strict in both directions. Herdr owns every topology
 semantic: where worktrees go, what a workspace is, when a pane is an
@@ -22,8 +25,10 @@ and re-implements neither.
 ## Architecture
 
 - `main.ts` owns routing, exit semantics, and the popup-friendly failure
-  hold. Routes are `launch`, the internal `execute-launch`, `--help`,
-  `--version`.
+  hold. Routes are `launch`, `conversation slug`, the internal
+  `execute-launch`, `--help`, `--version`. The conversation route holds
+  nothing on screen and exits 3 (no such transcript) or 4 (no user prompt
+  yet) so machine callers can poll.
 - `launch/model.ts` is the pure form: fields, focus, the harness → model →
   effort cascade, validation, and line building. Everything decidable
   without a terminal is decided here, where tests reach it. Defaults come
@@ -48,7 +53,22 @@ and re-implements neither.
   startup dialog cannot drop it. JSON answers only; success on stdout,
   errors on stderr.
 - `catalog.ts` consumes `agentlaunch x-catalog --x-json` — the resolved,
-  validated pair space. The TUI can never offer an invalid model:effort.
+  validated pair space, plus each harness's designated metadata level. The
+  TUI can never offer an invalid model:effort.
+- `conversation/` is the slug pipeline: `resolve.ts` finds the transcript
+  by id-in-filename glob over the harness's native store (no index in
+  between, so nothing can be stale); `extract.ts` reads the first
+  substantive user prompt per store grammar (meta lines, sidechains,
+  local-command output, and codex's injected instruction items are not
+  prompts; housekeeping commands stand only when nothing else follows);
+  `prompt.ts` holds the pure transforms — slash-command stripping,
+  @-mention expansion against the transcript's cwd, center truncation, and
+  keeper's slug normalization with its unsafe-text strip; `infer.ts`
+  composes the non-interactive completion and runs it in the fixed
+  `/tmp/agentsurface/inference` cwd so recorded sessions collect in one
+  quarantined workspace. Inference names `agentlaunch` directly — the bare
+  shims would exec the native binary under a session's AGENTLAUNCH_LAUNCH
+  sentinel and drop the level.
 - `projects.ts` + `state.ts`: roots scanned one level deep, ordered by the
   launch log's frequency counts; the log is bookkeeping, never authority.
 - `config*.ts` strictly load `~/.config/agentsurface/config.json`; absence
@@ -64,7 +84,8 @@ and re-implements neither.
   here.
 - The launched process is herdr's, started by `herdr agent start` running
   the bare harness command — which is the fleet shim into agentlaunch. No
-  harness binary is ever resolved or spawned by this repository.
+  harness binary is ever resolved or spawned by this repository; slug
+  inference spawns `agentlaunch`, which owns that resolution.
 - A project already on the surface gets a tab in its workspace; a
   workspace is created only when none hosts the project (a pane working
   inside it, else its name as the label).

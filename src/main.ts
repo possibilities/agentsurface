@@ -1,4 +1,9 @@
 #!/usr/bin/env bun
+import {
+  conversationSlug,
+  EXIT_NO_PROMPT,
+  EXIT_TRANSCRIPT_NOT_FOUND,
+} from "./conversation/slug.ts";
 import { CliError, UsageError } from "./errors.ts";
 import { TOP_HELP, VERSION } from "./help.ts";
 import { createHerdrCall, HerdrError } from "./herdr.ts";
@@ -63,6 +68,37 @@ async function main(argv: string[]): Promise<number> {
         console.error(`error: ${(error as Error).message ?? String(error)}`);
       }
       await holdForKeypress();
+      return 1;
+    }
+  }
+  if (first === "conversation") {
+    const second = argv[1];
+    if (second !== "slug") {
+      console.error(
+        second === undefined ? "conversation takes a subcommand" : `unknown subcommand "${second}"`,
+      );
+      console.error(TOP_HELP);
+      return 2;
+    }
+    // Machine-invoked (the tab-naming plugin polls the distinct exit
+    // codes), so failures report and exit — no popup hold.
+    try {
+      console.log(await conversationSlug(argv.slice(2), process.env, process.env["HOME"] ?? ""));
+      return 0;
+    } catch (error) {
+      if (error instanceof UsageError) {
+        console.error(error.message);
+        console.error(TOP_HELP);
+        return 2;
+      }
+      if (error instanceof CliError) {
+        console.error(`error: ${error.message}`);
+        if (error.recovery !== undefined) console.error(error.recovery);
+        if (error.code === "transcript_not_found") return EXIT_TRANSCRIPT_NOT_FOUND;
+        if (error.code === "transcript_no_prompt") return EXIT_NO_PROMPT;
+        return 1;
+      }
+      console.error(`error: ${(error as Error).message ?? String(error)}`);
       return 1;
     }
   }
