@@ -1,4 +1,11 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import type { Environ } from "./paths.ts";
 import { stateDirectory } from "./paths.ts";
@@ -51,6 +58,78 @@ export function readLaunchCounts(path: string): Map<string, number> {
 export function appendLaunch(path: string, record: LaunchRecord): void {
   mkdirSync(dirname(path), { recursive: true });
   appendFileSync(path, `${JSON.stringify(record)}\n`);
+}
+
+/** The interrupted form, shadowed on every repaint and cleared only on
+ * submit: an escape, a crash, or a closed popup loses nothing, and the next
+ * launcher opens exactly where this one stopped. A submitted launch starts
+ * fresh through the normal default resolution instead. */
+export interface FormDraft {
+  prompt: string;
+  project: string;
+  worktree: boolean;
+  harness: string;
+  model: string;
+  effort: string;
+}
+
+export function formDraftPath(env: Environ, home: string): string {
+  return join(stateDirectory(env, home, "agentsurface"), "form-draft.json");
+}
+
+export function readFormDraft(path: string): FormDraft | null {
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<FormDraft>;
+    if (
+      typeof parsed.prompt !== "string" ||
+      typeof parsed.project !== "string" ||
+      typeof parsed.worktree !== "boolean" ||
+      typeof parsed.harness !== "string" ||
+      typeof parsed.model !== "string" ||
+      typeof parsed.effort !== "string"
+    ) {
+      return null;
+    }
+    return {
+      prompt: parsed.prompt,
+      project: parsed.project,
+      worktree: parsed.worktree,
+      harness: parsed.harness,
+      model: parsed.model,
+      effort: parsed.effort,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function writeFormDraft(path: string, draft: FormDraft | null): void {
+  try {
+    if (draft === null) {
+      if (existsSync(path)) unlinkSync(path);
+      return;
+    }
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify(draft)}\n`);
+  } catch {
+    // Draft persistence is insurance, never a reason to block editing.
+  }
+}
+
+/** Every submitted plan, appended before the executor spawns: even a child
+ * that dies before its own logging leaves the full intent recoverable. */
+export function submittedLogPath(env: Environ, home: string): string {
+  return join(stateDirectory(env, home, "agentsurface"), "submitted.jsonl");
+}
+
+export function appendSubmitted(path: string, plan: unknown): void {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, `${JSON.stringify({ at: new Date().toISOString(), plan })}\n`);
+  } catch {
+    // Bookkeeping, never a launch blocker.
+  }
 }
 
 /** The last launch's cascade choices, for the next form's defaults. */

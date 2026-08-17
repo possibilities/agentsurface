@@ -21,6 +21,9 @@ export interface LaunchHarness {
   harness: string;
   defaultModel: string;
   defaultEffort: string;
+  /** The catalog's designated `model:effort` pair for metadata completions
+   * (conversation slugs, summaries); null when the harness offers none. */
+  metadataLevel: string | null;
   models: LaunchModel[];
 }
 
@@ -34,6 +37,7 @@ const harnessSchema = z.object({
   harness: z.string().min(1),
   default_model: z.string().min(1),
   default_effort: z.string().min(1),
+  metadata_level: z.string().min(1).nullable(),
   models: z.array(modelSchema).min(1),
 });
 
@@ -81,6 +85,7 @@ export function parseCatalogEnvelope(stdout: string): LaunchHarness[] {
     harness: entry.harness,
     defaultModel: entry.default_model,
     defaultEffort: entry.default_effort,
+    metadataLevel: entry.metadata_level,
     models: entry.models.map((model) => ({
       model: model.model,
       efforts: model.efforts,

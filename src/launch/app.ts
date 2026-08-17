@@ -6,13 +6,24 @@ import { loadConfig } from "../config.ts";
 import { createHerdrCall, invoke } from "../herdr.ts";
 import type { Environ } from "../paths.ts";
 import { orderProjects, scanProjects } from "../projects.ts";
-import { launchLogPath, readLastLaunch, readLaunchCounts } from "../state.ts";
+import {
+  appendSubmitted,
+  type FormDraft,
+  formDraftPath,
+  launchLogPath,
+  readFormDraft,
+  readLastLaunch,
+  readLaunchCounts,
+  submittedLogPath,
+  writeFormDraft,
+} from "../state.ts";
 import { spawnDetachedLaunch } from "./executor.ts";
 import {
   buildFormLines,
   buildPlan,
   type ChooseField,
   createForm,
+  currentEffort,
   currentHarness,
   currentModel,
   failRun,
@@ -44,11 +55,14 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   const logPath = launchLogPath(env, home);
   const projects = orderProjects(scanProjects(config.roots, home), readLaunchCounts(logPath), home);
 
+  const draftPath = formDraftPath(env, home);
+  const interrupted = readFormDraft(draftPath);
   const state = createForm({
     projects,
     harnesses,
     cwd: await focusedCwd(call, env),
     remembered: readLastLaunch(logPath),
+    draft: interrupted,
   });
 
   // @opentui/core is imported dynamically only — its platform-native package
@@ -110,11 +124,22 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     cursorColor: SIGNAL_ROOM.accent,
     placeholder: `describe the work${GLYPHS.ellipsis}`,
     placeholderColor: SIGNAL_ROOM.muted,
-    // Plain enter leaves the field (the shell routes it); shift+enter and
-    // ctrl+j are the explicit newline spellings — ctrl+j needs its kitty
-    // spelling beside the default map's legacy `linefeed`.
+    // Plain enter submits (the form advances); shift+enter and ctrl+j are
+    // the newline spellings — ctrl+j needs its kitty spelling beside the
+    // default map's legacy `linefeed`. The focused field keeps the FULL
+    // readline set, ctrl+k kill-to-line-end included; the palette chord
+    // applies from every other row.
     keyBindings: [
-      ...core.defaultTextareaKeyBindings,
+      ...core.defaultTextareaKeyBindings.filter(
+        (binding) =>
+          !(
+            (binding.name === "return" || binding.name === "kpenter") &&
+            binding.shift !== true &&
+            binding.action === "newline"
+          ),
+      ),
+      { name: "return", action: "submit" },
+      { name: "kpenter", action: "submit" },
       { name: "return", shift: true, action: "newline" },
       { name: "j", ctrl: true, action: "newline" },
     ],
@@ -265,17 +290,45 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     { id: "quit", key: "ESC", label: "quit without launching", onRun: () => shutdown(0) },
   ];
 
-  // Never intent.focus(): the renderer would then dispatch keys to it on
-  // its own, doubling the shell's single manual dispatch. The cursor flag
-  // alone carries the focus visual.
+  // The renderer routes keys and paste to the textarea exactly while it is
+  // focused — the one dispatch path, which also renders the cursor. Focus
+  // therefore follows the form strictly: prompt row, form phase, no overlay
+  // above, no editor suspension.
+  let intentFocused = false;
+  let lastDraftJson = "";
   const syncIntent = (): void => {
-    const promptFocused = state.focus === "prompt" && state.phase.kind === "form";
+    const overlayAbove =
+      commands.isOpen() || Object.values(choosers).some((overlay) => overlay.isOpen());
+    const promptFocused =
+      state.focus === "prompt" && state.phase.kind === "form" && !overlayAbove && !editing;
     // lineInfo reports the native wrap layout independent of the current
     // height (virtualLineCount is viewport-capped and cannot grow it).
     const intentRows = Math.max(1, Math.min(8, intent.lineInfo.lineWraps.length));
     intent.height = intentRows;
     rail.content = Array.from({ length: intentRows }, () => GLYPHS.inputRail).join("\n");
-    intent.showCursor = promptFocused;
+    if (promptFocused && !intentFocused) {
+      intent.focus();
+      intentFocused = true;
+    } else if (!promptFocused && intentFocused) {
+      intent.blur();
+      intentFocused = false;
+    }
+    // The draft file shadows the whole form on every repaint: nothing is
+    // ever lost to a crash, a stray escape, or a closed popup, and capture
+    // needs no dismissal hook — the current state is always already kept.
+    const draft: FormDraft = {
+      prompt: intent.plainText,
+      project: state.projects[state.projectIndex]?.path ?? "",
+      worktree: state.worktree,
+      harness: currentHarness(state).harness,
+      model: currentModel(state).model,
+      effort: currentEffort(state),
+    };
+    const serialized = JSON.stringify(draft);
+    if (serialized !== lastDraftJson) {
+      lastDraftJson = serialized;
+      writeFormDraft(draftPath, draft);
+    }
   };
 
   const paint = (): void => {
@@ -290,6 +343,24 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     }
     renderer.requestRender();
   };
+
+  // Enter submits inside the textarea; the flag tells the keypress listener
+  // below that this very event was consumed, not a second enter to act on.
+  let intentSubmitted = false;
+  intent.onSubmit = () => {
+    intentSubmitted = true;
+    state.prompt = intent.plainText;
+    if (state.focus === "prompt") state.focus = "project";
+    paint();
+  };
+
+  // A form that survived a crash, an escape, or a closed popup comes back
+  // whole; createForm already re-applied its rows where still valid.
+  if (interrupted !== null) {
+    intent.setText(interrupted.prompt);
+    state.prompt = interrupted.prompt;
+    state.notice = { text: "restored the interrupted launch", tone: "ok" };
+  }
 
   const openChooser = (field: ChooseField): void => {
     paint();
@@ -356,6 +427,9 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       paint();
       return;
     }
+    // The submitted plan is persisted before the spawn, and the draft
+    // clears only after it: the intent is recoverable at every instant.
+    appendSubmitted(submittedLogPath(env, home), { ...plan, focus });
     try {
       spawnDetachedLaunch(env, logPath, { ...plan, focus });
     } catch (error) {
@@ -363,6 +437,8 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       paint();
       return;
     }
+    writeFormDraft(draftPath, null);
+    lastDraftJson = "";
     if (focus) {
       shutdown(0);
       return;
@@ -375,19 +451,23 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     paint();
   };
 
-  renderer.keyInput.on("paste", (event) => {
-    if (editing) return;
-    const anyOverlayOpen =
-      commands.isOpen() || Object.values(choosers).some((overlay) => overlay.isOpen());
-    if (anyOverlayOpen) return;
-    if (state.focus !== "prompt" || state.phase.kind !== "form") return;
-    intent.handlePaste(event);
-    state.prompt = intent.plainText;
-    paint();
+  // The focused textarea receives paste through the renderer itself; this
+  // listener only repaints so height and the draft follow at once.
+  renderer.keyInput.on("paste", () => {
+    if (!editing) paint();
   });
 
   renderer.keyInput.on("keypress", (key) => {
     if (editing) return;
+    // Kitty-mode terminals report key releases too; only presses act.
+    if ((key as { eventType?: string }).eventType === "release") return;
+    // The renderer already forwarded this event to the focused textarea; a
+    // consumed enter arrives here with the focus ALREADY advanced by
+    // onSubmit, so the flag keeps it from reading as a second enter.
+    if (intentSubmitted) {
+      intentSubmitted = false;
+      return;
+    }
     if (key.ctrl && key.name === "c") {
       shutdown(130);
       return;
@@ -405,15 +485,14 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       commands.handleKey(key);
       return;
     }
-    if (key.ctrl && key.name === "k") {
-      commands.open();
-      return;
-    }
-    // Prompt-focused, the textarea owns editing; only the form's structural
-    // keys — leave, advance, quit, editor — go to the model. shift+enter
-    // stays with the textarea as an explicit newline.
+    // Prompt-focused, the field swallows every binding it knows — ctrl+k is
+    // kill-to-line-end here, the palette's chord everywhere else. Only the
+    // keys the textarea provably leaves alone are the form's.
     if (state.focus === "prompt" && state.phase.kind === "form") {
       const name = key.name;
+      // Plain enter is structural too: the widget's submit skips an empty
+      // field, and the intentSubmitted guard above already swallowed the
+      // consumed case — this path only ever sees the unconsumed one.
       const structural =
         name === "escape" ||
         name === "tab" ||
@@ -421,11 +500,14 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
         ((name === "return" || name === "enter") && key.shift !== true) ||
         (key.ctrl === true && name === "g");
       if (!structural) {
-        intent.handleKeyPress(key);
         state.prompt = intent.plainText;
         paint();
         return;
       }
+    }
+    if (key.ctrl && key.name === "k") {
+      commands.open();
+      return;
     }
     const action = handleFormKey(state, key);
     switch (action.kind) {

@@ -8,6 +8,7 @@ const HARNESSES: LaunchHarness[] = [
     harness: "claude",
     defaultModel: "fable",
     defaultEffort: "medium",
+    metadataLevel: "haiku:low",
     models: [{ model: "fable", efforts: ["low", "medium", "high"], defaultEffort: null }],
   },
 ];

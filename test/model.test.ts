@@ -23,6 +23,7 @@ const HARNESSES: LaunchHarness[] = [
     harness: "claude",
     defaultModel: "opus",
     defaultEffort: "medium",
+    metadataLevel: "haiku:low",
     models: [
       { model: "fable", efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: null },
       { model: "opus", efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: null },
@@ -32,6 +33,7 @@ const HARNESSES: LaunchHarness[] = [
     harness: "codex",
     defaultModel: "sol",
     defaultEffort: "high",
+    metadataLevel: "mini:low",
     models: [
       {
         model: "sol",
@@ -276,6 +278,45 @@ describe("createForm defaults", () => {
     // ultra is outlawed; the harness default (high) survives because spark
     // allows it, per the keep-when-allowed rule.
     expect(currentEffort(narrowed)).toBe("high");
+  });
+
+  test("an interrupted draft outranks remembered and cwd, degrading gracefully", () => {
+    const state = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      cwd: "/home/u/code/alpha",
+      remembered: { harness: "claude", model: "fable", effort: "max" },
+      draft: {
+        prompt: "held",
+        project: "/home/u/code/beta",
+        worktree: true,
+        harness: "codex",
+        model: "luna",
+        effort: "xhigh",
+      },
+    });
+    expect(state.projects[state.projectIndex]?.path).toBe("/home/u/code/beta");
+    expect(state.worktree).toBe(true);
+    expect(currentHarness(state).harness).toBe("codex");
+    expect(currentModel(state).model).toBe("luna");
+    expect(currentEffort(state)).toBe("xhigh");
+    expect(state.focus).toBe("prompt");
+
+    const degraded = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      draft: {
+        prompt: "held",
+        project: "/gone",
+        worktree: false,
+        harness: "codex",
+        model: "renamed-away",
+        effort: "ultra",
+      },
+    });
+    expect(currentHarness(degraded).harness).toBe("codex");
+    expect(currentModel(degraded).model).toBe("sol");
+    expect(degraded.projects[degraded.projectIndex]?.path).toBe("/home/u/code/alpha");
   });
 
   test("the cwd picks the project the launcher opened over", () => {

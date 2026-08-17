@@ -59,6 +59,14 @@ export interface RememberedLevel {
   effort: string;
 }
 
+/** An interrupted launcher's whole form, restored with highest precedence.
+ * The prompt travels too, but the shell owns feeding it to the textarea. */
+export interface FormDraftValues extends RememberedLevel {
+  prompt: string;
+  project: string;
+  worktree: boolean;
+}
+
 export function createForm(inputs: {
   projects: ProjectChoice[];
   harnesses: LaunchHarness[];
@@ -66,6 +74,9 @@ export function createForm(inputs: {
   cwd?: string;
   /** Applied where the catalog still allows it; catalog defaults otherwise. */
   remembered?: RememberedLevel | null;
+  /** The interrupted form, over both of the above; a submitted launch
+   * cleared it, so its presence means dismissal, not history. */
+  draft?: FormDraftValues | null;
 }): FormState {
   const state: FormState = {
     prompt: "",
@@ -84,6 +95,13 @@ export function createForm(inputs: {
   if (inputs.remembered != null) applyRemembered(state, inputs.remembered);
   if (inputs.cwd !== undefined) {
     state.projectIndex = projectIndexForCwd(state.projects, inputs.cwd);
+  }
+  const draft = inputs.draft;
+  if (draft != null) {
+    applyRemembered(state, draft);
+    const at = state.projects.findIndex((project) => project.path === draft.project);
+    if (at >= 0) state.projectIndex = at;
+    state.worktree = draft.worktree;
   }
   state.focus = "prompt";
   return state;

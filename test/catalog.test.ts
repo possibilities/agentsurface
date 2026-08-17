@@ -12,6 +12,7 @@ const GOOD = JSON.stringify({
         harness: "claude",
         default_model: "opus-1m",
         default_effort: "medium",
+        metadata_level: "haiku:low",
         models: [
           {
             model: "fable",
@@ -32,6 +33,7 @@ describe("parseCatalogEnvelope", () => {
     const claude = harnesses[0]!;
     expect(claude.harness).toBe("claude");
     expect(claude.defaultModel).toBe("opus-1m");
+    expect(claude.metadataLevel).toBe("haiku:low");
     expect(claude.models[0]?.efforts).toContain("xhigh");
     expect(claude.models[0]?.defaultEffort).toBeNull();
   });
