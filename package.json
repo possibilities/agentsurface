@@ -23,6 +23,7 @@
   },
   "files": [
     "src",
+    "plugin",
     "config.schema.json",
     "README.md",
     "LICENSE"

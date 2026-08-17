@@ -10,6 +10,7 @@ import { createHerdrCall, HerdrError } from "./herdr.ts";
 import { runLaunch } from "./launch/app.ts";
 import { executeLaunch, notifyLaunchFailure, parseDetachedLaunch } from "./launch/executor.ts";
 import { launchLogPath } from "./state.ts";
+import { nameTabFromEnvironment } from "./tab-namer.ts";
 
 /** The launcher usually runs inside a herdr popup, which closes with the
  * process — hold a failure on screen until a key or a timeout, so the
@@ -101,6 +102,15 @@ async function main(argv: string[]): Promise<number> {
       console.error(`error: ${(error as Error).message ?? String(error)}`);
       return 1;
     }
+  }
+  if (first === "name-tab") {
+    // Internal: herdr's plugin event hook on pane.agent_detected. Quiet by
+    // design — failures reach herdr's plugin log, never a notification.
+    if (argv.length > 1) {
+      console.error("name-tab takes no arguments");
+      return 2;
+    }
+    return await nameTabFromEnvironment(process.env, process.env["HOME"] ?? "");
   }
   if (first === "execute-launch") {
     // Internal: the launcher spawns this detached so the popup closes the

@@ -1,0 +1,17 @@
+# AgentSurface's herdr plugin: fleet behavior that rides the surface's own
+# event hooks. Linked by agentstart's installer (`herdr plugin link`); the
+# commands run `agentsurface`, the source-linked fleet install on PATH.
+id = "agentsurface"
+name = "AgentSurface"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Name each tab after its first conversation"
+platforms = ["macos", "linux"]
+
+# When herdr detects an agent in a pane, name the pane's tab after the
+# agent's conversation — once. The command polls herdr for the agent's
+# session identity and the transcript for its first prompt, then renames
+# the tab with `conversation slug`.
+[[events]]
+on = "pane.agent_detected"
+command = ["agentsurface", "name-tab"]

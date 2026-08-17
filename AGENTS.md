@@ -26,9 +26,9 @@ and re-implements neither.
 
 - `main.ts` owns routing, exit semantics, and the popup-friendly failure
   hold. Routes are `launch`, `conversation slug`, the internal
-  `execute-launch`, `--help`, `--version`. The conversation route holds
-  nothing on screen and exits 3 (no such transcript) or 4 (no user prompt
-  yet) so machine callers can poll.
+  `execute-launch` and `name-tab`, `--help`, `--version`. The conversation
+  route holds nothing on screen and exits 3 (no such transcript) or 4 (no
+  user prompt yet) so machine callers can poll.
 - `launch/model.ts` is the pure form: fields, focus, the harness → model →
   effort cascade, validation, and line building. Everything decidable
   without a terminal is decided here, where tests reach it. Defaults come
@@ -73,6 +73,12 @@ and re-implements neither.
   launch log's frequency counts; the log is bookkeeping, never authority.
 - `config*.ts` strictly load `~/.config/agentsurface/config.json`; absence
   means the default roots (`~/code`, `~/src`).
+- `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
+  installer. Its `pane.agent_detected` hook runs `agentsurface name-tab`;
+  `tab-namer.ts` polls the pane for its agent session, claims the tab in
+  the plugin's state directory (exclusive create — named once), polls
+  `conversation slug` while the transcript has no prompt, and renames the
+  tab. Failures release the claim and reach only herdr's plugin log.
 
 ## Invariants
 
