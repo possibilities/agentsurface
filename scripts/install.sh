@@ -6,10 +6,10 @@ ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 SOURCE="$ROOT/src/main.ts"
 BIN_DIR="${AGENTSURFACE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 STATE_DIR="${AGENTSURFACE_INSTALL_STATE_DIR:-$HOME/.local/state/agentsurface}"
-# The deployed app is a SNAPSHOT of the checkout's src, not a link into the
-# live working tree: this launcher is co-developed by concurrent agent
-# sessions while being the operator's daily driver, and a mid-edit tree
-# must never be what a popup keybinding runs. Installing is deploying.
+# The command is an EDITABLE install: ~/.local/bin/agentsurface links
+# straight to this checkout's src/main.ts and runs the live working tree,
+# like the rest of the fleet's tools. The snapshot deploy that preceded it
+# (and its deployed-sha receipt) is recognized only to be cleaned up.
 SNAP_DIR="${AGENTSURFACE_INSTALL_SNAP_DIR:-$HOME/.local/share/agentsurface/app}"
 SNAP_SOURCE="$SNAP_DIR/src/main.ts"
 TARGET="$BIN_DIR/agentsurface"
@@ -32,13 +32,11 @@ usage() {
 Usage: scripts/install.sh [--install|--uninstall|--help]
 
 With no option, installs agentsurface. Installation runs Bun's frozen
-dependency install, snapshots the checkout's committed src into
-~/.local/share/agentsurface/app (node_modules linked to the checkout),
-links ~/.local/bin/agentsurface to the snapshot, and writes the deployed
-Git SHA to ~/.local/state/agentsurface/deployed-sha. The launcher keeps
-running the snapshot while the working tree is edited; rerun this script
-to deploy a new state. A dirty src refuses to deploy unless
-AGENTSURFACE_INSTALL_ALLOW_DIRTY=1.
+dependency install and links ~/.local/bin/agentsurface straight to the
+checkout's src/main.ts — an editable install: the command runs the live
+working tree, like the rest of the fleet. Rerunning converges the link,
+and removes the retired snapshot deploy (~/.local/share/agentsurface/app)
+and its ~/.local/state/agentsurface/deployed-sha receipt when found.
 
 Set AGENTSURFACE_INSTALL_BIN_DIR, AGENTSURFACE_INSTALL_STATE_DIR, and
 AGENTSURFACE_INSTALL_SNAP_DIR to use other locations (including for
@@ -57,10 +55,6 @@ owner_uid() {
 
 file_mode() {
   stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"
-}
-
-file_nlink() {
-  stat -c %h "$1" 2>/dev/null || stat -f %l "$1"
 }
 
 validate_path() {
@@ -185,20 +179,6 @@ validate_managed_checkout() {
   MANAGED_SHA="$sha"
 }
 
-validate_managed_snapshot() {
-  local sha_file="$SNAP_DIR/.deployed-sha"
-  local sha
-
-  validate_path "$SNAP_DIR" "snapshot"
-  validate_directory "$SNAP_DIR" "snapshot"
-  validate_safe_file "$SNAP_SOURCE" "agentsurface snapshot command"
-  [[ ! -L "$sha_file" && -f "$sha_file" ]] || die "Refusing snapshot without provenance: $SNAP_DIR"
-  IFS= read -r sha <"$sha_file" || die "Refusing malformed snapshot provenance: $sha_file"
-  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "Refusing malformed snapshot provenance: $sha_file"
-  MANAGED_ROOT="$SNAP_DIR"
-  MANAGED_SHA="$sha"
-}
-
 classify_command() {
   local destination root
   MANAGED_KIND="absent"
@@ -212,13 +192,14 @@ classify_command() {
   if [[ -L "$TARGET" ]]; then
     [[ "$(owner_uid "$TARGET")" == "$(id -u)" ]] || die "Refusing foreign command symlink: $TARGET"
     destination="$(readlink "$TARGET")"
+    # The retired snapshot deploy: recognized as managed only so installing
+    # replaces the link and uninstalling removes it; deletion safety for the
+    # snapshot directory itself rests on its provenance file.
     if [[ "$destination" == "$SNAP_SOURCE" ]]; then
-      validate_managed_snapshot
       MANAGED_KIND="snapshot"
+      MANAGED_ROOT="$SNAP_DIR"
       return 0
     fi
-    # The earlier install shape linked straight into a checkout's live src;
-    # still recognized as managed so an upgrade replaces it cleanly.
     [[ "$destination" == /*/src/main.ts ]] || die "Refusing foreign command symlink: $TARGET"
     root="${destination%/src/main.ts}"
     [[ "$destination" == "$root/src/main.ts" ]] || die "Refusing foreign command symlink: $TARGET"
@@ -230,110 +211,61 @@ classify_command() {
   die "Refusing foreign command path: $TARGET"
 }
 
-validate_receipt() {
-  local expected_sha="${1:-}"
-  local sha
+LEGACY_REMOVED=0
 
-  [[ ! -L "$RECEIPT" && -f "$RECEIPT" ]] || die "Refusing unsafe deployed receipt: $RECEIPT"
-  [[ "$(owner_uid "$RECEIPT")" == "$(id -u)" ]] || die "Refusing foreign deployed receipt: $RECEIPT"
-  [[ "$(file_nlink "$RECEIPT")" == "1" ]] || die "Refusing hardlinked deployed receipt: $RECEIPT"
-  [[ "$(file_mode "$RECEIPT")" == "600" ]] || die "Refusing deployed receipt with unsafe permissions: $RECEIPT"
-  IFS= read -r sha <"$RECEIPT" || die "Refusing malformed deployed receipt: $RECEIPT"
-  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "Refusing malformed deployed receipt: $RECEIPT"
-  printf '%s\n' "$sha" | cmp -s - "$RECEIPT" || die "Refusing malformed deployed receipt: $RECEIPT"
-  if [[ -n "$expected_sha" && "$sha" != "$expected_sha" ]]; then
-    die "Refusing deployed receipt that does not match the managed command: $RECEIPT"
+remove_legacy_snapshot() {
+  # Only a directory this installer provably wrote — the provenance file is
+  # the marker — is ever deleted; anything else at the path is left alone.
+  if [[ -f "$SNAP_DIR/.deployed-sha" && ! -L "$SNAP_DIR/.deployed-sha" ]]; then
+    validate_path "$SNAP_DIR" "snapshot"
+    [[ "$(owner_uid "$SNAP_DIR")" == "$(id -u)" ]] || die "Refusing foreign snapshot directory: $SNAP_DIR"
+    rm -rf -- "$SNAP_DIR"
+    rmdir "$(dirname "$SNAP_DIR")" 2>/dev/null || true
+    LEGACY_REMOVED=1
   fi
 }
 
-receipt_exists() {
-  [[ -e "$RECEIPT" || -L "$RECEIPT" ]]
-}
-
-build_snapshot() {
-  local sha="$1"
-  local parent staging
-
-  parent="$(dirname "$SNAP_DIR")"
-  validate_path "$SNAP_DIR" "snapshot"
-  ensure_directory "$parent" "snapshot parent" 755
-
-  staging="$parent/.app-staging.$$"
-  rm -rf -- "$staging"
-  mkdir -p -- "$staging"
-  cp -R "$ROOT/src" "$staging/src"
-  cp "$ROOT/package.json" "$staging/package.json"
-  # Dependencies stay the checkout's: bun install rewrites them atomically
-  # enough, and duplicating the native OpenTUI build per deploy buys nothing.
-  ln -s -- "$ROOT/node_modules" "$staging/node_modules"
-  printf '%s\n' "$sha" >"$staging/.deployed-sha"
-
-  rm -rf -- "$SNAP_DIR"
-  mv -- "$staging" "$SNAP_DIR"
+remove_legacy_receipt() {
+  # deployed-sha recorded which commit the snapshot ran; an editable link
+  # has no deploy to record, so the receipt retires with the snapshot.
+  if [[ -e "$RECEIPT" || -L "$RECEIPT" ]]; then
+    [[ ! -L "$RECEIPT" && -f "$RECEIPT" ]] || die "Refusing unsafe deployed receipt: $RECEIPT"
+    [[ "$(owner_uid "$RECEIPT")" == "$(id -u)" ]] || die "Refusing foreign deployed receipt: $RECEIPT"
+    rm -f -- "$RECEIPT"
+    LEGACY_REMOVED=1
+  fi
 }
 
 install_agentsurface() {
-  local sha
-
   command -v bun >/dev/null 2>&1 || die "Bun is required but was not found in PATH"
   validate_path "$SOURCE" "source command"
   validate_safe_file "$SOURCE" "source command"
   [[ -x "$SOURCE" ]] || die "Source command is not executable: $SOURCE"
-  sha="$(checkout_head "$ROOT")" || die "Could not derive a lowercase 40-hex Git HEAD from $ROOT"
   validate_managed_checkout "$ROOT"
 
-  # The snapshot must equal the receipt's commit: a mid-edit working tree
-  # is exactly what deploying exists to keep out of the popup.
-  if [[ "${AGENTSURFACE_INSTALL_ALLOW_DIRTY:-}" != "1" ]] && \
-      [[ -n "$(git -C "$ROOT" status --porcelain -- src package.json bun.lock 2>/dev/null)" ]]; then
-    die "Refusing to deploy a dirty src (commit first, or AGENTSURFACE_INSTALL_ALLOW_DIRTY=1)"
-  fi
-
   ensure_directory "$BIN_DIR" "bin" 755
-  ensure_directory "$STATE_DIR" "state" 700
   classify_command
-  if receipt_exists; then
-    [[ "$MANAGED_KIND" != "absent" ]] || die "Refusing an uncorroborated deployed receipt: $RECEIPT"
-    if [[ "$MANAGED_KIND" == "snapshot" && "$MANAGED_SHA" == "$sha" ]]; then
-      # Recover if an earlier install replaced the snapshot but was
-      # interrupted before atomically replacing its old valid receipt.
-      validate_receipt
-    elif [[ "$MANAGED_KIND" == "source-link" ]]; then
-      # The legacy link tracked a live tree, so its receipt names whatever
-      # commit installed it — unrelatable to the current head. Shape-only
-      # corroboration is the honest check while upgrading it away.
-      validate_receipt
-    else
-      validate_receipt "$MANAGED_SHA"
-    fi
-  fi
 
   (cd "$ROOT" && bun install --frozen-lockfile)
-  build_snapshot "$sha"
 
   TMP_PATH="$BIN_DIR/.agentsurface-link.$$.$RANDOM"
   [[ ! -e "$TMP_PATH" && ! -L "$TMP_PATH" ]] || die "Refusing unsafe temporary command path: $TMP_PATH"
-  ln -s -- "$SNAP_SOURCE" "$TMP_PATH"
+  ln -s -- "$SOURCE" "$TMP_PATH"
   mv -f -- "$TMP_PATH" "$TARGET"
   TMP_PATH=""
 
   [[ -L "$TARGET" ]] || die "Installed command is not a symlink: $TARGET"
-  [[ "$(readlink "$TARGET")" == "$SNAP_SOURCE" ]] || die "Installed command points to the wrong source: $TARGET"
+  [[ "$(readlink "$TARGET")" == "$SOURCE" ]] || die "Installed command points to the wrong source: $TARGET"
   classify_command
-  [[ "$MANAGED_KIND" == "snapshot" && "$MANAGED_SHA" == "$sha" ]] || \
+  [[ "$MANAGED_KIND" == "source-link" && "$MANAGED_ROOT" == "$ROOT" ]] || \
     die "Installed command failed verification: $TARGET"
 
-  TMP_PATH="$(mktemp "$STATE_DIR/.deployed-sha.XXXXXX")"
-  chmod 0600 "$TMP_PATH"
-  printf '%s\n' "$sha" >"$TMP_PATH"
-  [[ ! -L "$TMP_PATH" && -f "$TMP_PATH" && "$(owner_uid "$TMP_PATH")" == "$(id -u)" && "$(file_nlink "$TMP_PATH")" == "1" && "$(file_mode "$TMP_PATH")" == "600" ]] || \
-    die "Temporary deployed receipt failed verification"
-  printf '%s\n' "$sha" | cmp -s - "$TMP_PATH" || die "Temporary deployed receipt failed content verification"
-  mv -f -- "$TMP_PATH" "$RECEIPT"
-  TMP_PATH=""
-  validate_receipt "$sha"
+  # Legacy cleanup runs after the swap, so an interruption here still
+  # leaves a working editable install rather than a dangling link.
+  remove_legacy_snapshot
+  remove_legacy_receipt
 
-  echo "Installed $TARGET at $sha"
+  echo "Installed $TARGET -> $SOURCE"
 }
 
 uninstall_agentsurface() {
@@ -350,29 +282,17 @@ uninstall_agentsurface() {
   fi
 
   classify_command
-  if receipt_exists; then
-    [[ "$MANAGED_KIND" != "absent" ]] || die "Refusing an uncorroborated deployed receipt: $RECEIPT"
-    validate_receipt "$MANAGED_SHA"
-  fi
-
   if [[ "$MANAGED_KIND" != "absent" ]]; then
     rm -f -- "$TARGET"
     removed=1
   fi
-  if [[ "$MANAGED_KIND" == "snapshot" || -f "$SNAP_DIR/.deployed-sha" ]]; then
-    validate_path "$SNAP_DIR" "snapshot"
-    rm -rf -- "$SNAP_DIR"
-    removed=1
-  fi
-  if receipt_exists; then
-    rm -f -- "$RECEIPT"
-    removed=1
-  fi
+  remove_legacy_snapshot
+  remove_legacy_receipt
   if (( have_state )); then
     rmdir "$STATE_DIR" 2>/dev/null || true
   fi
 
-  if (( removed )); then
+  if (( removed || LEGACY_REMOVED )); then
     echo "Removed agentsurface installation"
   else
     echo "AgentSurface is not installed"

@@ -104,10 +104,11 @@ git clone https://github.com/possibilities/agentsurface.git ~/code/agentsurface
 ~/code/agentsurface/scripts/install.sh --install
 ```
 
-The hardened, rerunnable installer links `~/.local/bin/agentsurface` to the
-checkout and writes a deployment receipt under
-`~/.local/state/agentsurface/`. It accepts `--uninstall` and refuses foreign
-or unsafe paths instead of replacing them.
+The hardened, rerunnable installer links `~/.local/bin/agentsurface`
+straight to the checkout's `src/main.ts` — an editable install that runs
+the live working tree, like the rest of the fleet's tools. It accepts
+`--uninstall` and refuses foreign or unsafe paths instead of replacing
+them.
 
 ## Configuration
 
