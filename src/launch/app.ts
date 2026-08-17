@@ -343,6 +343,10 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       commands.isOpen() || Object.values(choosers).some((overlay) => overlay.isOpen());
     const promptFocused =
       state.focus === "prompt" && state.phase.kind === "form" && !overlayAbove && !editing;
+    // The wrap width is set explicitly to the padded content box minus the
+    // rail: left to flex, the field measures against the frame's full
+    // width and wraps columns past the popup's edge before snapping back.
+    intent.width = Math.max(8, (process.stdout.columns ?? 80) - 6);
     // lineInfo reports the native wrap layout independent of the current
     // height (virtualLineCount is viewport-capped and cannot grow it).
     const intentRows = Math.max(1, Math.min(8, intent.lineInfo.lineWraps.length));
