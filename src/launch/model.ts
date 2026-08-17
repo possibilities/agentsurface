@@ -643,10 +643,7 @@ export function buildFormLines(state: FormState, width: number): Line[] {
   const projectValue: Span[] =
     project === undefined
       ? [span("no projects found", "danger")]
-      : [
-          ...selectValue(state, "project", fit(project.display, width - LABEL_WIDTH - 10)),
-          ...(project.count > 0 ? [span(`  ${project.count}×`, "muted")] : []),
-        ];
+      : [...selectValue(state, "project", fit(project.display, width - LABEL_WIDTH - 10))];
   lines.push(fieldRow(state, "project", "project", projectValue));
 
   lines.push(

@@ -35,7 +35,7 @@ describe("buildFormLines", () => {
     expect(text).toContain("describe the work");
     expect(text).toContain("project");
     expect(text).toContain("~/code/alpha");
-    expect(text).toContain("3×");
+    expect(text).not.toContain("3×"); // frequency orders the list, unshown
     expect(text).toContain("○ no worktree");
     expect(text).toContain("claude");
     expect(text).toContain("fable");

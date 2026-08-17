@@ -155,10 +155,10 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   const chooserItems = (field: ChooseField) => {
     switch (field) {
       case "project":
+        // The launch count orders the list; it stays bookkeeping, unshown.
         return state.projects.map((project, index) => ({
           id: String(index),
           label: project.display,
-          ...(project.count > 0 ? { meta: `${project.count}×` } : {}),
           onRun: () => {
             setProject(state, index);
             paint();
