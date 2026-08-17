@@ -81,6 +81,12 @@ entrypoint runs `agentusage` through the escape-to-close wrapper in an 80%
 popup titled `Agent Usage`; AgentStart binds `prefix+u` to that
 entrypoint instead of duplicating the title and geometry in the keybinding.
 
+Its `voice` entrypoint runs `agentvoice remote` in an 80% popup titled `Agent
+Voice`, bound to `prefix+v` the same way — the remote control for the voice
+console already running on this machine, so mute, redial, and Fresh are a
+chord away without leaving the surface. It runs unwrapped: that TUI spends esc
+on its own ctrl+k palette and quits on `q`.
+
 ## Conversation slug
 
 ```sh

@@ -3,14 +3,15 @@
 # the source-linked fleet installs on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.4.1"
+version = "0.5.0"
 min_herdr_version = "0.8.0"
-description = "Launch agents, show subscription usage, label projects, and name conversation tabs"
+description = "Launch agents, show subscription usage, control the voice console, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
 
 # Popup titles follow one convention: the title-cased name of the CLI the TUI
 # is a frontend for — the launch form fronts agentlaunch, the usage dialog
-# fronts agentusage. A new pane entrypoint takes its CLI's name the same way.
+# fronts agentusage, the voice console fronts agentvoice. A new pane entrypoint
+# takes its CLI's name the same way.
 #
 # The launch surface is a session-modal popup over the active pane. Its caller
 # passes the active pane's cwd so the form preselects the project it opened over.
@@ -31,6 +32,19 @@ placement = "popup"
 width = "80%"
 height = "80%"
 command = ["escape-to-quit", "agentusage"]
+
+# The voice console's remote control: `agentvoice remote` attaches to the
+# console already running on this machine (waiting and reconnecting when it is
+# not), so the popup is a control surface, never a second audio session. It
+# takes no wrapper — the TUI owns esc for its ctrl+k palette, and `q` quits —
+# and it stays on 80% geometry because the remote adapts to any terminal shape.
+[[panes]]
+id = "voice"
+title = "Agent Voice"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["agentvoice", "remote"]
 
 # When herdr detects an agent in a pane, publish its sidebar project token and
 # name the pane's tab after the agent's conversation — once. Each invocation is

@@ -102,9 +102,11 @@ and re-implements neither.
   entrypoint runs `agentsurface launch` in a session-modal popup;
   AgentStart's keybinding passes the active pane's cwd when it opens the
   entrypoint. Its `usage` pane entrypoint runs `agentusage` through the
-  escape-to-close wrapper. Popup titles follow one convention — the
-  title-cased name of the CLI the TUI fronts: `Agent Launch`, `Agent
-  Usage`. Its
+  escape-to-close wrapper; its `voice` pane entrypoint runs `agentvoice
+  remote`, bare — that TUI spends esc on its own palette and quits on `q`,
+  so the wrapper would close the popup instead of the palette. Popup titles
+  follow one convention — the title-cased name of the CLI the TUI fronts:
+  `Agent Launch`, `Agent Usage`, `Agent Voice`. Its
   `pane.agent_detected` and `pane.agent_status_changed` hooks both run
   `agentsurface name-tab`; `tab-namer.ts` publishes the `$project` sidebar
   token on detection only (the current workspace label, or the root
