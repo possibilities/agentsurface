@@ -29,6 +29,11 @@ combinations the catalog already allows.
 a harness snaps to its default model and effort; changing a model keeps the
 effort when allowed, else snaps to the model's, else the harness's, default.
 
+**Priming** — A configured skill prefixed onto an intent in the harness's own
+spelling. The first configured priming is the fresh form's default; `none`
+remains available to launch the intent without a skill prefix. _Avoid_: system
+prompt, preprompt.
+
 **Surface** — Herdr, the terminal workspace manager the fleet launches onto.
 AgentSurface drives it only through the `herdr` CLI's socket API.
 

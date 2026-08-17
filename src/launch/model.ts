@@ -49,7 +49,7 @@ export interface FormState {
   harnessIndex: number;
   modelIndex: number;
   effortIndex: number;
-  /** "none" first, then the config's primings in order. */
+  /** "none" first for selection, then the config's primings in order. */
   primingOptions: string[];
   primingIndex: number;
   focus: Field;
@@ -62,8 +62,6 @@ export interface RememberedLevel {
   harness: string;
   model: string;
   effort: string;
-  /** The last launch's priming; absent in older records means none. */
-  priming?: string | null;
 }
 
 /** An interrupted launcher's whole form, restored with highest precedence.
@@ -72,6 +70,7 @@ export interface FormDraftValues extends RememberedLevel {
   prompt: string;
   project: string;
   worktree: boolean;
+  priming: string;
 }
 
 export function createForm(inputs: {
@@ -87,6 +86,12 @@ export function createForm(inputs: {
    * cleared it, so its presence means dismissal, not history. */
   draft?: FormDraftValues | null;
 }): FormState {
+  const primingOptions = [
+    PRIMING_NONE,
+    ...(inputs.primings ?? []).filter(
+      (priming, at, all) => priming !== PRIMING_NONE && all.indexOf(priming) === at,
+    ),
+  ];
   const state: FormState = {
     prompt: "",
     projects: inputs.projects,
@@ -96,13 +101,8 @@ export function createForm(inputs: {
     harnessIndex: 0,
     modelIndex: 0,
     effortIndex: 0,
-    primingOptions: [
-      PRIMING_NONE,
-      ...(inputs.primings ?? []).filter(
-        (priming, at, all) => priming !== PRIMING_NONE && all.indexOf(priming) === at,
-      ),
-    ],
-    primingIndex: 0,
+    primingOptions,
+    primingIndex: primingOptions.length > 1 ? 1 : 0,
     focus: "prompt",
     phase: { kind: "form" },
     notice: null,
@@ -110,7 +110,6 @@ export function createForm(inputs: {
   snapToHarnessDefaults(state);
   if (inputs.remembered != null) {
     applyRemembered(state, inputs.remembered);
-    applyPriming(state, inputs.remembered.priming);
   }
   if (inputs.cwd !== undefined) {
     state.projectIndex = projectIndexForCwd(state.projects, inputs.cwd);
@@ -127,9 +126,9 @@ export function createForm(inputs: {
   return state;
 }
 
-/** A remembered priming applies only while still configured; none otherwise. */
-function applyPriming(state: FormState, priming: string | null | undefined): void {
-  if (priming == null) return;
+/** An interrupted form's priming applies only while still configured; a
+ * removed choice leaves the first configured priming as the fresh default. */
+function applyPriming(state: FormState, priming: string): void {
   const at = state.primingOptions.indexOf(priming);
   if (at >= 0) state.primingIndex = at;
 }

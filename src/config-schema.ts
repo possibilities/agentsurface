@@ -33,7 +33,7 @@ export const configFileSchema = z.strictObject({
     )
     .optional()
     .describe(
-      'Primings offered by the launcher beside "none", in order. Omitted: none are offered.',
+      'Primings offered by the launcher beside "none", in order; the first is the default. Omitted: none are offered.',
     ),
 });
 

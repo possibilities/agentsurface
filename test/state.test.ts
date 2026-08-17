@@ -100,7 +100,7 @@ describe("the launch log", () => {
     expect(typeof line.at).toBe("string");
   });
 
-  test("remembers the last launch's cascade and priming, skipping garbage tails", () => {
+  test("remembers the last launch's cascade, skipping garbage tails", () => {
     const path = logPath();
     expect(readLastLaunch(path)).toBeNull();
     appendLaunch(path, RECORD);
@@ -116,7 +116,6 @@ describe("the launch log", () => {
       harness: "codex",
       model: "sol",
       effort: "ultra",
-      priming: "build",
     });
   });
 });

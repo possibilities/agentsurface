@@ -37,9 +37,10 @@ optional), then confirm the rest.
   and opens it as its own workspace.
 - **Priming** — an optional skill prefixed onto the intent, chosen from the
   config's `priming` list (`i` or space opens the picker; "none" is the
-  default, and the last used choice carries forward like the cascade). It
-  travels in each harness's own spelling: `/collab …` for claude and pi,
-  `$collab …` for codex — the prefix alone when the intent is empty.
+  first picker option, while the first configured skill is the default).
+  An interrupted form restores its selection. Priming travels in each
+  harness's own spelling: `/collab …` for claude and pi, `$collab …` for
+  codex — the prefix alone when the intent is empty.
 - **Harness → model → effort** — the cascade from agentlaunch's catalog,
   fetched at runtime via `agentlaunch x-catalog`; only validated
   combinations are offered, e.g. `claude → fable → xhigh`. Each row is a

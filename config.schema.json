@@ -15,7 +15,7 @@
       }
     },
     "priming": {
-      "description": "Primings offered by the launcher beside \"none\", in order. Omitted: none are offered.",
+      "description": "Primings offered by the launcher beside \"none\", in order; the first is the default. Omitted: none are offered.",
       "type": "array",
       "items": {
         "type": "string",

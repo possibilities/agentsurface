@@ -211,40 +211,34 @@ describe("priming", () => {
       primings: ["collab", "build", "orchestrate"],
     });
 
-  test("offers none first, then the config's order; none is the default", () => {
+  test("offers none first, then the config's order; the first configured priming defaults", () => {
     const state = withPrimings();
     expect(state.primingOptions).toEqual(["none", "collab", "build", "orchestrate"]);
-    expect(currentPriming(state)).toBe("none");
+    expect(currentPriming(state)).toBe("collab");
     expect(form().primingOptions).toEqual(["none"]);
+    expect(currentPriming(form())).toBe("none");
   });
 
   test("cycles, chooses via i, and rides the plan as null-for-none", () => {
     const state = withPrimings();
     state.focus = "priming";
-    handleFormKey(state, key("right"));
-    expect(currentPriming(state)).toBe("collab");
-    expect(buildPlan(state)?.priming).toBe("collab");
+    handleFormKey(state, key("left"));
+    expect(currentPriming(state)).toBe("none");
+    expect(buildPlan(state)?.priming).toBeNull();
     state.focus = "harness";
     expect(handleFormKey(state, key("i"))).toEqual({ kind: "choose", field: "priming" });
-    setPriming(state, 0);
-    expect(buildPlan(state)?.priming).toBeNull();
+    setPriming(state, 2);
+    expect(buildPlan(state)?.priming).toBe("build");
   });
 
-  test("a remembered priming applies only while still configured", () => {
-    const kept = createForm({
+  test("launch history does not override the configured priming default", () => {
+    const state = createForm({
       projects: [...PROJECTS],
       harnesses: HARNESSES,
-      primings: ["collab"],
-      remembered: { harness: "claude", model: "opus", effort: "medium", priming: "collab" },
+      primings: ["collab", "build"],
+      remembered: { harness: "codex", model: "luna", effort: "max" },
     });
-    expect(currentPriming(kept)).toBe("collab");
-    const gone = createForm({
-      projects: [...PROJECTS],
-      harnesses: HARNESSES,
-      primings: ["build"],
-      remembered: { harness: "claude", model: "opus", effort: "medium", priming: "collab" },
-    });
-    expect(currentPriming(gone)).toBe("none");
+    expect(currentPriming(state)).toBe("collab");
   });
 });
 
@@ -339,6 +333,7 @@ describe("createForm defaults", () => {
     const state = createForm({
       projects: [...PROJECTS],
       harnesses: HARNESSES,
+      primings: ["collab", "build"],
       cwd: "/home/u/code/alpha",
       remembered: { harness: "claude", model: "fable", effort: "max" },
       draft: {
@@ -348,6 +343,7 @@ describe("createForm defaults", () => {
         harness: "codex",
         model: "luna",
         effort: "xhigh",
+        priming: "build",
       },
     });
     expect(state.projects[state.projectIndex]?.path).toBe("/home/u/code/beta");
@@ -355,6 +351,7 @@ describe("createForm defaults", () => {
     expect(currentHarness(state).harness).toBe("codex");
     expect(currentModel(state).model).toBe("luna");
     expect(currentEffort(state)).toBe("xhigh");
+    expect(currentPriming(state)).toBe("build");
     expect(state.focus).toBe("prompt");
 
     const degraded = createForm({
@@ -367,6 +364,7 @@ describe("createForm defaults", () => {
         harness: "codex",
         model: "renamed-away",
         effort: "ultra",
+        priming: "none",
       },
     });
     expect(currentHarness(degraded).harness).toBe("codex");

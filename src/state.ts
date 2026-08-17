@@ -136,13 +136,12 @@ export function appendSubmitted(path: string, plan: unknown): void {
   }
 }
 
-/** The last launch's cascade and priming choices, for the next form's
- * defaults; priming is null where an older record never wrote one. */
+/** The last launch's cascade choices, for the next form's defaults. Priming
+ * is not remembered; it defaults from configuration order. */
 export interface LastLevel {
   harness: string;
   model: string;
   effort: string;
-  priming: string | null;
 }
 
 export function readLastLaunch(path: string): LastLevel | null {
@@ -161,7 +160,6 @@ export function readLastLaunch(path: string): LastLevel | null {
         harness?: unknown;
         model?: unknown;
         effort?: unknown;
-        priming?: unknown;
       };
       if (
         typeof record.harness === "string" &&
@@ -172,7 +170,6 @@ export function readLastLaunch(path: string): LastLevel | null {
           harness: record.harness,
           model: record.model,
           effort: record.effort,
-          priming: typeof record.priming === "string" ? record.priming : null,
         };
       }
     } catch {
