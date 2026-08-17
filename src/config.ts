@@ -9,6 +9,8 @@ import { configDirectory } from "./paths.ts";
  * default roots apply. When it exists it is validated strictly. */
 export interface Config {
   roots: string[];
+  /** Priming choices offered beside "none", in configured order. */
+  priming: string[];
   path: string;
   exists: boolean;
 }
@@ -21,7 +23,7 @@ export function configPath(env: Environ, home: string): string {
 
 export function loadConfig(env: Environ, home: string): Config {
   const path = configPath(env, home);
-  if (!existsSync(path)) return { roots: [...DEFAULT_ROOTS], path, exists: false };
+  if (!existsSync(path)) return { roots: [...DEFAULT_ROOTS], priming: [], path, exists: false };
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -43,5 +45,10 @@ export function loadConfig(env: Environ, home: string): Config {
   // before validation, whatever its value.
   const { $schema: _schema, ...body } = parsed as Record<string, unknown>;
   const values = parseConfig(body, path);
-  return { roots: values.roots ?? [...DEFAULT_ROOTS], path, exists: true };
+  return {
+    roots: values.roots ?? [...DEFAULT_ROOTS],
+    priming: values.priming ?? [],
+    path,
+    exists: true,
+  };
 }

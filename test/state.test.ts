@@ -35,6 +35,7 @@ const RECORD = {
   branch: null,
   workspace: "w9",
   agent: "claude-1",
+  priming: null,
 };
 
 describe("the launch log", () => {
@@ -67,6 +68,7 @@ describe("the launch log", () => {
       harness: "claude",
       model: "fable",
       effort: "low",
+      priming: "collab",
     };
     writeFormDraft(path, draft);
     expect(readFormDraft(path)).toEqual(draft);
@@ -80,6 +82,7 @@ describe("the launch log", () => {
     writeFormDraft(path, {
       prompt: "p",
       project: "/x",
+      priming: "none",
       worktree: false,
       harness: "claude",
       model: "fable",
@@ -97,12 +100,23 @@ describe("the launch log", () => {
     expect(typeof line.at).toBe("string");
   });
 
-  test("remembers the last launch's cascade, skipping garbage tails", () => {
+  test("remembers the last launch's cascade and priming, skipping garbage tails", () => {
     const path = logPath();
     expect(readLastLaunch(path)).toBeNull();
     appendLaunch(path, RECORD);
-    appendLaunch(path, { ...RECORD, harness: "codex", model: "sol", effort: "ultra" });
+    appendLaunch(path, {
+      ...RECORD,
+      harness: "codex",
+      model: "sol",
+      effort: "ultra",
+      priming: "build",
+    });
     appendFileSync(path, "{garbage\n");
-    expect(readLastLaunch(path)).toEqual({ harness: "codex", model: "sol", effort: "ultra" });
+    expect(readLastLaunch(path)).toEqual({
+      harness: "codex",
+      model: "sol",
+      effort: "ultra",
+      priming: "build",
+    });
   });
 });

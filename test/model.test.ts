@@ -6,6 +6,7 @@ import {
   currentEffort,
   currentHarness,
   currentModel,
+  currentPriming,
   type FormState,
   failRun,
   handleFormKey,
@@ -15,6 +16,7 @@ import {
   setEffort,
   setHarness,
   setModel,
+  setPriming,
 } from "../src/launch/model.ts";
 import type { ProjectChoice } from "../src/projects.ts";
 
@@ -86,14 +88,22 @@ describe("focus traversal", () => {
     expect(handleFormKey(state, key("return")).kind).toBe("launch");
   });
 
-  test("tab cycles the six rows", () => {
+  test("tab cycles the seven rows", () => {
     const state = form();
     const seen: string[] = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 7; i++) {
       handleFormKey(state, key("tab"));
       seen.push(state.focus);
     }
-    expect(seen).toEqual(["project", "worktree", "harness", "model", "effort", "prompt"]);
+    expect(seen).toEqual([
+      "project",
+      "worktree",
+      "harness",
+      "model",
+      "effort",
+      "priming",
+      "prompt",
+    ]);
   });
 
   test("escape quits; shift-tab and up go backwards", () => {
@@ -190,6 +200,51 @@ describe("direct keys", () => {
     state.focus = "prompt";
     handleFormKey(state, key("w"));
     expect(state.worktree).toBe(true);
+  });
+});
+
+describe("priming", () => {
+  const withPrimings = (): FormState =>
+    createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      primings: ["collab", "build", "orchestrate"],
+    });
+
+  test("offers none first, then the config's order; none is the default", () => {
+    const state = withPrimings();
+    expect(state.primingOptions).toEqual(["none", "collab", "build", "orchestrate"]);
+    expect(currentPriming(state)).toBe("none");
+    expect(form().primingOptions).toEqual(["none"]);
+  });
+
+  test("cycles, chooses via i, and rides the plan as null-for-none", () => {
+    const state = withPrimings();
+    state.focus = "priming";
+    handleFormKey(state, key("right"));
+    expect(currentPriming(state)).toBe("collab");
+    expect(buildPlan(state)?.priming).toBe("collab");
+    state.focus = "harness";
+    expect(handleFormKey(state, key("i"))).toEqual({ kind: "choose", field: "priming" });
+    setPriming(state, 0);
+    expect(buildPlan(state)?.priming).toBeNull();
+  });
+
+  test("a remembered priming applies only while still configured", () => {
+    const kept = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      primings: ["collab"],
+      remembered: { harness: "claude", model: "opus", effort: "medium", priming: "collab" },
+    });
+    expect(currentPriming(kept)).toBe("collab");
+    const gone = createForm({
+      projects: [...PROJECTS],
+      harnesses: HARNESSES,
+      primings: ["build"],
+      remembered: { harness: "claude", model: "opus", effort: "medium", priming: "collab" },
+    });
+    expect(currentPriming(gone)).toBe("none");
   });
 });
 

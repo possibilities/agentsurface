@@ -13,6 +13,15 @@
         "minLength": 1,
         "description": "One project root; ~ and ~/ expand to the operator's home directory."
       }
+    },
+    "priming": {
+      "description": "Primings offered by the launcher beside \"none\", in order. Omitted: none are offered.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]*$",
+        "description": "One priming choice: a skill name the launcher prefixes onto the intent — /name for claude and pi, $name for codex."
+      }
     }
   },
   "additionalProperties": false

@@ -19,6 +19,22 @@ export const configFileSchema = z.strictObject({
     .describe(
       "Parent directories scanned one level deep for project directories, in scan order. Omitted entirely: ~/code and ~/src.",
     ),
+  priming: z
+    .array(
+      z
+        .string()
+        .regex(
+          /^[a-z0-9][a-z0-9-]*$/,
+          "a priming is a bare skill name: lowercase letters, digits, hyphens",
+        )
+        .describe(
+          "One priming choice: a skill name the launcher prefixes onto the intent — /name for claude and pi, $name for codex.",
+        ),
+    )
+    .optional()
+    .describe(
+      'Primings offered by the launcher beside "none", in order. Omitted: none are offered.',
+    ),
 });
 
 export type ConfigValues = z.infer<typeof configFileSchema>;

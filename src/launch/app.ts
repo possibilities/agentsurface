@@ -26,6 +26,7 @@ import {
   currentEffort,
   currentHarness,
   currentModel,
+  currentPriming,
   failRun,
   handleFormKey,
   normalizeEditedIntent,
@@ -33,6 +34,7 @@ import {
   setEffort,
   setHarness,
   setModel,
+  setPriming,
   setProject,
   toggleWorktree,
 } from "./model.ts";
@@ -91,6 +93,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   const state = createForm({
     projects,
     harnesses,
+    primings: config.priming,
     cwd: await focusedCwd(call, env),
     remembered: readLastLaunch(logPath),
     draft: interrupted,
@@ -197,6 +200,10 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       title: " EFFORTS ",
       empty: "no matching effort",
     }),
+    priming: createListOverlay(core, renderer, "launch-primings", tokens, {
+      title: " PRIMINGS ",
+      empty: "no matching priming",
+    }),
   };
   renderer.root.add(commands.root);
   for (const overlay of Object.values(choosers)) renderer.root.add(overlay.root);
@@ -272,6 +279,15 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
             paint();
           },
         }));
+      case "priming":
+        return state.primingOptions.map((priming, index) => ({
+          id: String(index),
+          label: priming,
+          onRun: () => {
+            setPriming(state, index);
+            paint();
+          },
+        }));
     }
   };
 
@@ -285,6 +301,8 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
         return state.modelIndex;
       case "effort":
         return state.effortIndex;
+      case "priming":
+        return state.primingIndex;
     }
   };
 
@@ -295,6 +313,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     { id: "harness", key: "H", label: "choose harness", onRun: () => openChooser("harness") },
     { id: "model", key: "M", label: "choose model", onRun: () => openChooser("model") },
     { id: "effort", key: "E", label: "choose effort", onRun: () => openChooser("effort") },
+    { id: "priming", key: "I", label: "choose priming", onRun: () => openChooser("priming") },
     {
       id: "worktree",
       key: "W",
@@ -341,6 +360,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       harness: currentHarness(state).harness,
       model: currentModel(state).model,
       effort: currentEffort(state),
+      priming: currentPriming(state),
     };
     const serialized = JSON.stringify(draft);
     if (serialized !== lastDraftJson) {
@@ -356,7 +376,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     syncIntent();
     body.content = linesToStyled(buildFormLines(state, width));
     commands.update({ width: columns, height: rows, items: commandItems() });
-    for (const field of ["project", "harness", "model", "effort"] as const) {
+    for (const field of ["project", "harness", "model", "effort", "priming"] as const) {
       choosers[field].update({ width: columns, height: rows, items: chooserItems(field) });
     }
     renderer.requestRender();
@@ -373,11 +393,10 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   };
 
   // A form that survived a crash, an escape, or a closed popup comes back
-  // whole; createForm already re-applied its rows where still valid.
+  // whole and silently; createForm already re-applied its rows.
   if (interrupted !== null) {
     intent.setText(interrupted.prompt);
     state.prompt = interrupted.prompt;
-    state.notice = { text: "restored the interrupted launch", tone: "ok" };
   }
 
   const openChooser = (field: ChooseField): void => {

@@ -26,6 +26,7 @@ export interface LaunchRecord {
   branch: string | null;
   workspace: string;
   agent: string;
+  priming: string | null;
 }
 
 export function launchLogPath(env: Environ, home: string): string {
@@ -71,6 +72,7 @@ export interface FormDraft {
   harness: string;
   model: string;
   effort: string;
+  priming: string;
 }
 
 export function formDraftPath(env: Environ, home: string): string {
@@ -87,7 +89,8 @@ export function readFormDraft(path: string): FormDraft | null {
       typeof parsed.worktree !== "boolean" ||
       typeof parsed.harness !== "string" ||
       typeof parsed.model !== "string" ||
-      typeof parsed.effort !== "string"
+      typeof parsed.effort !== "string" ||
+      typeof parsed.priming !== "string"
     ) {
       return null;
     }
@@ -98,6 +101,7 @@ export function readFormDraft(path: string): FormDraft | null {
       harness: parsed.harness,
       model: parsed.model,
       effort: parsed.effort,
+      priming: parsed.priming,
     };
   } catch {
     return null;
@@ -132,11 +136,13 @@ export function appendSubmitted(path: string, plan: unknown): void {
   }
 }
 
-/** The last launch's cascade choices, for the next form's defaults. */
+/** The last launch's cascade and priming choices, for the next form's
+ * defaults; priming is null where an older record never wrote one. */
 export interface LastLevel {
   harness: string;
   model: string;
   effort: string;
+  priming: string | null;
 }
 
 export function readLastLaunch(path: string): LastLevel | null {
@@ -155,13 +161,19 @@ export function readLastLaunch(path: string): LastLevel | null {
         harness?: unknown;
         model?: unknown;
         effort?: unknown;
+        priming?: unknown;
       };
       if (
         typeof record.harness === "string" &&
         typeof record.model === "string" &&
         typeof record.effort === "string"
       ) {
-        last = { harness: record.harness, model: record.model, effort: record.effort };
+        last = {
+          harness: record.harness,
+          model: record.model,
+          effort: record.effort,
+          priming: typeof record.priming === "string" ? record.priming : null,
+        };
       }
     } catch {
       // A garbled line names no choices.

@@ -9,6 +9,7 @@ import {
   executeLaunch,
   findProjectWorkspace,
   parseDetachedLaunch,
+  primedPrompt,
 } from "../src/launch/executor.ts";
 
 let temps: string[] = [];
@@ -39,6 +40,7 @@ function fake(responses: HerdrResponse[]): { call: HerdrCall; calls: string[][] 
 const PLAN: DetachedLaunch = {
   project: { path: "/code/alpha", display: "~/code/alpha", count: 0 },
   worktree: false,
+  priming: null,
   harness: "claude",
   model: "fable",
   effort: "max",
@@ -92,6 +94,24 @@ describe("findProjectWorkspace", () => {
       { result: { workspaces: [{ workspace_id: "w3", label: "other" }] } },
     ]);
     expect(findProjectWorkspace(absent.call, "/code/alpha")).resolves.toBeNull();
+  });
+});
+
+describe("primedPrompt", () => {
+  test("each harness spells its own skill prefix; empty intents prime alone", () => {
+    expect(primedPrompt({ harness: "claude", prompt: "fix it", priming: "collab" })).toBe(
+      "/collab fix it",
+    );
+    expect(primedPrompt({ harness: "pi", prompt: "fix it", priming: "build" })).toBe(
+      "/build fix it",
+    );
+    expect(primedPrompt({ harness: "codex", prompt: "fix it", priming: "collab" })).toBe(
+      "$collab fix it",
+    );
+    expect(primedPrompt({ harness: "codex", prompt: "", priming: "orchestrate" })).toBe(
+      "$orchestrate",
+    );
+    expect(primedPrompt({ harness: "claude", prompt: "fix it", priming: null })).toBe("fix it");
   });
 });
 

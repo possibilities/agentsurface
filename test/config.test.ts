@@ -44,6 +44,22 @@ describe("loadConfig", () => {
     expect(config.roots).toEqual(["~/work"]);
   });
 
+  test("priming choices parse; a malformed name refuses loudly", () => {
+    const context = writeConfig(JSON.stringify({ priming: ["collab", "build", "orchestrate"] }));
+    const config = loadConfig(context.env, context.home);
+    expect(config.priming).toEqual(["collab", "build", "orchestrate"]);
+    expect(config.roots).toEqual([...DEFAULT_ROOTS]);
+
+    const bad = writeConfig(JSON.stringify({ priming: ["Not A Skill"] }));
+    let caught: unknown;
+    try {
+      loadConfig(bad.env, bad.home);
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as CliError).code).toBe("config_invalid");
+  });
+
   test("mistyped keys, empty roots, and broken JSON all refuse loudly", () => {
     for (const content of [
       JSON.stringify({ root: ["~/code"] }),

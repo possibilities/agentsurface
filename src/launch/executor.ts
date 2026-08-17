@@ -49,7 +49,8 @@ export function parseDetachedLaunch(json: string): DetachedLaunch {
     typeof plan.level !== "string" ||
     typeof plan.prompt !== "string" ||
     typeof plan.worktree !== "boolean" ||
-    typeof plan.focus !== "boolean"
+    typeof plan.focus !== "boolean" ||
+    (plan.priming !== null && typeof plan.priming !== "string")
   ) {
     throw new UsageError("execute-launch plan is missing fields");
   }
@@ -77,6 +78,15 @@ export function spawnDetachedLaunch(env: Environ, logPath: string, plan: Detache
   );
   proc.unref();
   if (typeof stderr === "number") closeSync(stderr);
+}
+
+/** A priming rides the intent as each harness's own skill spelling: /name
+ * for claude and pi, $name for codex — the prefix alone when the intent is
+ * empty, so the skill still primes the session. */
+export function primedPrompt(plan: Pick<DetachedLaunch, "harness" | "prompt" | "priming">): string {
+  if (plan.priming === null) return plan.prompt;
+  const sigil = plan.harness === "codex" ? "$" : "/";
+  return `${sigil}${plan.priming}${plan.prompt === "" ? "" : ` ${plan.prompt}`}`;
 }
 
 /** Two launches fired in quick succession can race to the same `<kind>-<n>`
@@ -111,7 +121,8 @@ export async function executeLaunch(
       });
     }
   }
-  const agentArgs = ["--x-level", plan.level, ...(plan.prompt === "" ? [] : [plan.prompt])];
+  const primed = primedPrompt(plan);
+  const agentArgs = ["--x-level", plan.level, ...(primed === "" ? [] : [primed])];
   const tried = new Set<string>();
   let name = "";
   for (let attempt = 0; ; attempt++) {
@@ -142,6 +153,7 @@ export async function executeLaunch(
     branch: surface.branch,
     workspace: surface.workspaceId,
     agent: name,
+    priming: plan.priming,
   });
 }
 

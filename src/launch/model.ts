@@ -22,12 +22,12 @@ export interface KeyEvent {
   sequence?: string;
 }
 
-export type Field = "prompt" | "project" | "worktree" | "harness" | "model" | "effort";
+export type Field = "prompt" | "project" | "worktree" | "harness" | "model" | "effort" | "priming";
 
 export type Phase = { kind: "form" } | { kind: "failed"; message: string };
 
 /** The rows whose values are picked from a list overlay. */
-export type ChooseField = "project" | "harness" | "model" | "effort";
+export type ChooseField = "project" | "harness" | "model" | "effort" | "priming";
 
 export type FormAction =
   | { kind: "none" }
@@ -36,6 +36,8 @@ export type FormAction =
   | { kind: "launchAnother" }
   | { kind: "choose"; field: ChooseField }
   | { kind: "editIntent" };
+
+export const PRIMING_NONE = "none";
 
 export interface FormState {
   /** The intent, synced from the textarea when a decision needs it. */
@@ -47,6 +49,9 @@ export interface FormState {
   harnessIndex: number;
   modelIndex: number;
   effortIndex: number;
+  /** "none" first, then the config's primings in order. */
+  primingOptions: string[];
+  primingIndex: number;
   focus: Field;
   phase: Phase;
   notice: { text: string; tone: "warn" | "ok" } | null;
@@ -57,6 +62,8 @@ export interface RememberedLevel {
   harness: string;
   model: string;
   effort: string;
+  /** The last launch's priming; absent in older records means none. */
+  priming?: string | null;
 }
 
 /** An interrupted launcher's whole form, restored with highest precedence.
@@ -70,6 +77,8 @@ export interface FormDraftValues extends RememberedLevel {
 export function createForm(inputs: {
   projects: ProjectChoice[];
   harnesses: LaunchHarness[];
+  /** Priming choices from the config, offered beside "none". */
+  primings?: string[];
   /** The focused pane's cwd; preselects the project the launcher opened over. */
   cwd?: string;
   /** Applied where the catalog still allows it; catalog defaults otherwise. */
@@ -87,24 +96,42 @@ export function createForm(inputs: {
     harnessIndex: 0,
     modelIndex: 0,
     effortIndex: 0,
+    primingOptions: [
+      PRIMING_NONE,
+      ...(inputs.primings ?? []).filter(
+        (priming, at, all) => priming !== PRIMING_NONE && all.indexOf(priming) === at,
+      ),
+    ],
+    primingIndex: 0,
     focus: "prompt",
     phase: { kind: "form" },
     notice: null,
   };
   snapToHarnessDefaults(state);
-  if (inputs.remembered != null) applyRemembered(state, inputs.remembered);
+  if (inputs.remembered != null) {
+    applyRemembered(state, inputs.remembered);
+    applyPriming(state, inputs.remembered.priming);
+  }
   if (inputs.cwd !== undefined) {
     state.projectIndex = projectIndexForCwd(state.projects, inputs.cwd);
   }
   const draft = inputs.draft;
   if (draft != null) {
     applyRemembered(state, draft);
+    applyPriming(state, draft.priming);
     const at = state.projects.findIndex((project) => project.path === draft.project);
     if (at >= 0) state.projectIndex = at;
     state.worktree = draft.worktree;
   }
   state.focus = "prompt";
   return state;
+}
+
+/** A remembered priming applies only while still configured; none otherwise. */
+function applyPriming(state: FormState, priming: string | null | undefined): void {
+  if (priming == null) return;
+  const at = state.primingOptions.indexOf(priming);
+  if (at >= 0) state.primingIndex = at;
 }
 
 /** Each dimension applies only while the previous one matched, so a renamed
@@ -158,6 +185,7 @@ const FIELD_ORDER: readonly Field[] = [
   "harness",
   "model",
   "effort",
+  "priming",
 ];
 
 function moveFocus(state: FormState, delta: number): void {
@@ -187,6 +215,9 @@ function cycleValue(state: FormState, delta: number): void {
     case "effort":
       setEffort(state, wrap(state.effortIndex, delta, currentModel(state).efforts.length));
       return;
+    case "priming":
+      setPriming(state, wrap(state.primingIndex, delta, state.primingOptions.length));
+      return;
     default:
       return;
   }
@@ -214,6 +245,16 @@ export function setEffort(state: FormState, index: number): void {
   if (index < 0 || index >= currentModel(state).efforts.length) return;
   state.focus = "effort";
   state.effortIndex = index;
+}
+
+export function setPriming(state: FormState, index: number): void {
+  if (index < 0 || index >= state.primingOptions.length) return;
+  state.focus = "priming";
+  state.primingIndex = index;
+}
+
+export function currentPriming(state: FormState): string {
+  return state.primingOptions[state.primingIndex] ?? PRIMING_NONE;
 }
 
 export function toggleWorktree(state: FormState): void {
@@ -301,6 +342,8 @@ export function handleFormKey(state: FormState, key: KeyEvent): FormAction {
       return { kind: "choose", field: "model" };
     case "e":
       return { kind: "choose", field: "effort" };
+    case "i":
+      return { kind: "choose", field: "priming" };
     case "w":
       toggleWorktree(state);
       return { kind: "none" };
@@ -320,6 +363,9 @@ export interface LaunchPlan {
   effort: string;
   level: string;
   prompt: string;
+  /** A configured skill name prefixed onto the intent by the executor —
+   * /name for claude and pi, $name for codex; null when none. */
+  priming: string | null;
 }
 
 /** Validate and freeze the launch. A refusal states itself on the form. */
@@ -330,6 +376,7 @@ export function buildPlan(state: FormState): LaunchPlan | null {
   }
   const model = currentModel(state);
   const effort = currentEffort(state);
+  const priming = currentPriming(state);
   return {
     project: state.projects[state.projectIndex]!,
     worktree: state.worktree,
@@ -338,6 +385,7 @@ export function buildPlan(state: FormState): LaunchPlan | null {
     effort,
     level: `${model.model}:${effort}`,
     prompt: state.prompt.trim(),
+    priming: priming === PRIMING_NONE ? null : priming,
   };
 }
 
@@ -383,12 +431,17 @@ function fieldRow(state: FormState, field: Field, label: string, value: Span[]):
   ];
 }
 
-function selectValue(state: FormState, field: Field, value: string): Span[] {
+function selectValue(
+  state: FormState,
+  field: Field,
+  value: string,
+  tone: Span["token"] = "text",
+): Span[] {
   const focused = state.focus === field && state.phase.kind === "form";
-  if (!focused) return [span(value, "text")];
+  if (!focused) return [span(value, tone)];
   return [
     span(`${GLYPHS.prev} `, "faint"),
-    span(value, "text", true),
+    span(value, tone, true),
     span(` ${GLYPHS.next}`, "faint"),
   ];
 }
@@ -429,6 +482,15 @@ export function buildFormLines(state: FormState, width: number): Line[] {
   );
   lines.push(
     fieldRow(state, "effort", "effort", selectValue(state, "effort", currentEffort(state))),
+  );
+  const priming = currentPriming(state);
+  lines.push(
+    fieldRow(
+      state,
+      "priming",
+      "priming",
+      selectValue(state, "priming", priming, priming === PRIMING_NONE ? "muted" : "text"),
+    ),
   );
 
   const status = statusLines(state, width);
