@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as core from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { intentKeyBindings } from "../src/launch/app.ts";
+import { clampIntentScroll, intentKeyBindings } from "../src/launch/app.ts";
 
 /**
  * Pins the OpenTUI Textarea behavior the intent field relies on: plain
@@ -63,6 +63,24 @@ describe("the intent textarea", () => {
     expect(intent.plainText).toBe("one\ntwoP\nQ");
     intent.setText("reset");
     expect(intent.plainText).toBe("reset");
+    setup.renderer.destroy();
+  });
+
+  test("backspace removes trailing blank lines beyond the viewport cap", async () => {
+    const { setup, intent, press } = await field();
+    intent.height = 8;
+    intent.setText(`one${"\n".repeat(12)}`);
+    intent.cursorOffset = intent.plainText.length;
+    await setup.renderOnce();
+
+    for (let remaining = 11; remaining >= 0; remaining--) {
+      press("backspace");
+      clampIntentScroll(intent, Math.min(8, remaining + 1));
+      await setup.renderOnce();
+      expect(intent.plainText).toBe(`one${"\n".repeat(remaining)}`);
+      expect(intent.scrollY).toBe(Math.max(0, remaining + 1 - 8));
+    }
+
     setup.renderer.destroy();
   });
 

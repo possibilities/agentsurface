@@ -83,6 +83,30 @@ export function intentKeyBindings(defaults: readonly IntentBinding[]): IntentBin
   ];
 }
 
+interface IntentViewport {
+  editorView: {
+    getViewport(): { offsetX: number; offsetY: number; width: number; height: number };
+    getTotalVirtualLineCount(): number;
+    setViewport(x: number, y: number, width: number, height: number, moveCursor?: boolean): void;
+  };
+}
+
+/** OpenTUI follows the cursor down as the intent grows, but does not clamp
+ * that scroll origin when trailing lines are deleted while the field stays
+ * at its eight-row cap. Keep the viewport inside the newly shorter intent. */
+export function clampIntentScroll(intent: IntentViewport, rows: number): void {
+  const viewport = intent.editorView.getViewport();
+  const maxOffsetY = Math.max(0, intent.editorView.getTotalVirtualLineCount() - rows);
+  if (viewport.offsetY <= maxOffsetY) return;
+  intent.editorView.setViewport(
+    viewport.offsetX,
+    maxOffsetY,
+    viewport.width,
+    viewport.height,
+    false,
+  );
+}
+
 export async function runLaunch(env: Environ, home: string): Promise<number> {
   // Everything fallible happens before the alternate screen, so a failure
   // prints plainly where the shell — or main's popup hold — can show it.
@@ -455,6 +479,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     const intentRows = Math.max(1, Math.min(8, intent.lineInfo.lineWraps.length));
     intent.height = intentRows;
     rail.content = Array.from({ length: intentRows }, () => GLYPHS.inputRail).join("\n");
+    clampIntentScroll(intent, intentRows);
     if (promptFocused && !intentFocused) {
       intent.focus();
       intentFocused = true;
