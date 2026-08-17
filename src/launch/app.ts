@@ -18,6 +18,7 @@ import {
   writeFormDraft,
 } from "../state.ts";
 import { spawnDetachedLaunch } from "./executor.ts";
+import { createKillRing, killDirectionFor, pushKill, removedText, ringEntry } from "./killring.ts";
 import {
   buildFormLines,
   buildPlan,
@@ -402,11 +403,47 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   };
 
   // A form that survived a crash, an escape, or a closed popup comes back
-  // whole and silently; createForm already re-applied its rows.
+  // whole and silently; createForm already re-applied its rows. The cursor
+  // lands at the end, ready to continue the thought.
   if (interrupted !== null) {
     intent.setText(interrupted.prompt);
+    intent.cursorOffset = intent.plainText.length;
     state.prompt = interrupted.prompt;
   }
+
+  // The readline kill ring, observed around the widget's own kills; ctrl+y
+  // yanks and alt+y cycles, per killring.ts.
+  const killRing = createKillRing();
+  let lastIntentEdit: "kill" | "yank" | null = null;
+  let yankRegion: { start: number; length: number; index: number } | null = null;
+  let intentShadow = { text: intent.plainText, cursor: intent.cursorOffset };
+
+  const syncAfterIntentEdit = (): void => {
+    intentShadow = { text: intent.plainText, cursor: intent.cursorOffset };
+    state.prompt = intent.plainText;
+    paint();
+  };
+
+  const yankIntent = (): void => {
+    const top = ringEntry(killRing, 0);
+    if (top === null) return;
+    const start = intent.cursorOffset;
+    intent.insertText(top);
+    yankRegion = { start, length: top.length, index: 0 };
+    lastIntentEdit = "yank";
+    syncAfterIntentEdit();
+  };
+
+  const yankPopIntent = (): void => {
+    if (lastIntentEdit !== "yank" || yankRegion === null) return;
+    const next = ringEntry(killRing, yankRegion.index + 1);
+    if (next === null) return;
+    intent.cursorOffset = yankRegion.start + yankRegion.length;
+    for (let i = 0; i < yankRegion.length; i++) intent.deleteCharBackward();
+    intent.insertText(next);
+    yankRegion = { start: yankRegion.start, length: next.length, index: yankRegion.index + 1 };
+    syncAfterIntentEdit();
+  };
 
   const openChooser = (field: ChooseField): void => {
     paint();
@@ -453,6 +490,9 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     editing = false;
     if (outcome.kind === "edited") {
       intent.setText(normalizeEditedIntent(outcome.text));
+      intent.cursorOffset = intent.plainText.length;
+      intentShadow = { text: intent.plainText, cursor: intent.cursorOffset };
+      lastIntentEdit = null;
       state.prompt = intent.plainText;
       state.focus = "prompt";
     } else if (outcome.kind === "unchanged") {
@@ -514,7 +554,12 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   // The focused textarea receives paste through the renderer itself; this
   // listener only repaints so height and the draft follow at once.
   renderer.keyInput.on("paste", () => {
-    if (!editing) paint();
+    if (editing) return;
+    lastIntentEdit = null;
+    queueMicrotask(() => {
+      intentShadow = { text: intent.plainText, cursor: intent.cursorOffset };
+      paint();
+    });
   });
 
   renderer.keyInput.on("keypress", (key) => {
@@ -560,10 +605,41 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
         ((name === "return" || name === "enter") && key.shift !== true) ||
         (key.ctrl === true && name === "g");
       if (!structural) {
-        state.prompt = intent.plainText;
-        paint();
+        // Yank and yank-pop are ours — the widget has no ring of its own.
+        if (key.ctrl === true && name === "y") {
+          yankIntent();
+          return;
+        }
+        if (key.meta === true && name === "y") {
+          yankPopIntent();
+          return;
+        }
+        // Everything else is the widget's; the microtask runs after its
+        // dispatch (whichever listener order), so the diff sees the kill.
+        const kill = killDirectionFor({
+          name,
+          ...(key.ctrl === true ? { ctrl: true } : {}),
+          ...(key.meta === true ? { meta: true } : {}),
+          ...(key.shift === true ? { shift: true } : {}),
+        });
+        const before = intentShadow;
+        queueMicrotask(() => {
+          if (kill !== null) {
+            pushKill(
+              killRing,
+              removedText(before.text, intent.plainText),
+              kill,
+              lastIntentEdit === "kill",
+            );
+            lastIntentEdit = "kill";
+          } else {
+            lastIntentEdit = null;
+          }
+          syncAfterIntentEdit();
+        });
         return;
       }
+      lastIntentEdit = null;
     }
     if (key.ctrl && key.name === "k") {
       commands.open();

@@ -16,8 +16,11 @@ optional), then confirm the rest.
 - **Intent** — the prompt at the top; it rides the launch as the agent's
   first prompt. The field is a real line editor (OpenTUI's textarea):
   readline motions and kills (ctrl+a/e/b/f, alt+b/f, ctrl+w/u, alt+d, and
-  ctrl+k kill-to-line-end while focused), selection, native undo/redo
-  (ctrl+- or ctrl+_ or ctrl+/ undo, ctrl+. redo), and paste all behave;
+  ctrl+k kill-to-line-end while focused) feeding a real kill ring —
+  consecutive kills merge, ctrl+y yanks, alt+y cycles the ring —
+  selection, native undo/redo (ctrl+- or ctrl+_ or ctrl+/ undo, ctrl+.
+  redo), and paste all behave; a restored draft opens with the cursor at
+  the end;
   shift+enter or ctrl+j insert a newline; ctrl+g opens the intent in
   `$EDITOR` (`$VISUAL` first) the way the harnesses do. Enter moves on to
   the configuration rows; the ctrl+k command palette answers from every
