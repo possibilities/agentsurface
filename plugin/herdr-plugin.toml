@@ -3,7 +3,7 @@
 # the source-linked fleet installs on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.5.0"
+version = "0.6.0"
 min_herdr_version = "0.8.0"
 description = "Launch agents, show subscription usage, control the voice console, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
@@ -46,11 +46,12 @@ width = "80%"
 height = "80%"
 command = ["agentvoice", "remote"]
 
-# When herdr detects an agent in a pane, publish its sidebar project token and
-# name the pane's tab after the agent's conversation — once. Each invocation is
-# one bounded attempt: it polls herdr briefly for the agent's session identity
-# and the transcript for its first prompt, then renames the tab with
-# `conversation slug`.
+# When herdr detects an agent in a pane, publish its sidebar project and
+# conversation tokens and name the pane's tab after the agent's conversation —
+# once. The conversation token opens as an untitled placeholder and follows the
+# slug when naming lands. Each invocation is one bounded attempt: it polls
+# herdr briefly for the agent's session identity and the transcript for its
+# first prompt, then renames the tab with `conversation slug`.
 [[events]]
 on = "pane.agent_detected"
 command = ["agentsurface", "name-tab"]

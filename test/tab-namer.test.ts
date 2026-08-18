@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { HerdrCall } from "../src/herdr.ts";
 import {
   parsePaneEvent,
+  reportConversationToken,
   reportSidebarProjectToken,
   runTabNamer,
   type SlugOutcome,
@@ -42,6 +43,7 @@ const STATUS_EVENT = JSON.stringify({
 interface FakeSurface {
   call: HerdrCall;
   renames: string[][];
+  reports: string[][];
   paneReads: number;
 }
 
@@ -53,10 +55,22 @@ function surface(
     sessionAfterReads?: number;
     tabForRead?: (read: number) => string;
     errorAfterReads?: number;
+    tabLabel?: string;
+    reportError?: boolean;
   } = {},
 ): FakeSurface {
-  const fake: FakeSurface = { renames: [], paneReads: 0, call: undefined as never };
+  const fake: FakeSurface = { renames: [], reports: [], paneReads: 0, call: undefined as never };
   fake.call = async (args) => {
+    if (args[0] === "pane" && args[1] === "report-metadata") {
+      if (options.reportError === true) {
+        return { error: { code: "pane_not_found", message: "no such pane" } };
+      }
+      fake.reports.push(args.slice(2));
+      return { result: {} };
+    }
+    if (args[0] === "tab" && args[1] === "get") {
+      return { result: { tab: { label: options.tabLabel ?? "1" } } };
+    }
     if (args[0] === "pane" && args[1] === "get") {
       fake.paneReads += 1;
       if (options.errorAfterReads !== undefined && fake.paneReads > options.errorAfterReads) {
@@ -214,6 +228,52 @@ describe("reportSidebarProjectToken", () => {
   });
 });
 
+describe("reportConversationToken", () => {
+  test("an unclaimed tab gets the untitled placeholder", async () => {
+    const fake = surface(null);
+    await reportConversationToken(fake.call, "pane_1", stateDir());
+    expect(fake.reports).toEqual([
+      ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=untitled agent"],
+    ]);
+  });
+
+  test("a pending claim still reads as untitled", async () => {
+    const fake = surface(null);
+    const dir = stateDir();
+    mkdirSync(join(dir, "named-tabs"), { recursive: true });
+    writeFileSync(join(dir, "named-tabs", "tab_1"), "pending 99999\n");
+    await reportConversationToken(fake.call, "pane_1", dir);
+    expect(fake.reports).toEqual([
+      ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=untitled agent"],
+    ]);
+  });
+
+  test("a named claim republishes the tab's current label", async () => {
+    // Pane metadata does not survive a herdr restart; the re-detection that
+    // follows a restore is what puts a named tab's token back.
+    const fake = surface(null, { tabLabel: "fix-the-tests" });
+    const dir = stateDir();
+    mkdirSync(join(dir, "named-tabs"), { recursive: true });
+    writeFileSync(join(dir, "named-tabs", "tab_1"), "named\n");
+    await reportConversationToken(fake.call, "pane_1", dir);
+    expect(fake.reports).toEqual([
+      ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=fix-the-tests"],
+    ]);
+  });
+
+  test("a pane response without a tab is an error", async () => {
+    const fake = surface(null, { tabForRead: () => "" });
+    let thrown: Error | null = null;
+    try {
+      await reportConversationToken(fake.call, "pane_1", stateDir());
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toContain("named no tab");
+    expect(fake.reports).toHaveLength(0);
+  });
+});
+
 describe("runTabNamer", () => {
   test("names the tab from the session's slug and keeps the claim", async () => {
     const fake = surface(CLAUDE_SESSION, { sessionAfterReads: 2 });
@@ -227,6 +287,18 @@ describe("runTabNamer", () => {
     expect(fake.paneReads).toBe(3);
     expect(asked).toEqual([["claude", "abc-123"]]);
     expect(fake.renames).toEqual([["tab_1", "fix-the-tests"]]);
+    expect(fake.reports).toEqual([
+      ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=fix-the-tests"],
+    ]);
+    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+  });
+
+  test("a failed slug report leaves the name and the claim standing", async () => {
+    const fake = surface(CLAUDE_SESSION, { reportError: true });
+    const dir = stateDir();
+    const code = await namer(fake, dir, async () => ({ kind: "slug", value: "kept" }));
+    expect(code).toBe(0);
+    expect(fake.renames).toEqual([["tab_1", "kept"]]);
     expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
   });
 

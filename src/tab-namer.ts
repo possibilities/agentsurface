@@ -9,7 +9,9 @@ import type { Environ } from "./paths.ts";
 /**
  * The plugin's event half: herdr runs `agentsurface name-tab` on every
  * `pane.agent_detected` and `pane.agent_status_changed`, and this names the
- * pane's tab after the agent's conversation — once. Each invocation is one
+ * pane's tab after the agent's conversation — once — while keeping the
+ * sidebar's `$conversation` token in step: an untitled placeholder from
+ * detection, the slug once naming lands. Each invocation is one
  * bounded attempt: the pane is polled until its agent_session appears, then
  * the transcript until it holds a first prompt (exit 4 from `conversation
  * slug` underneath), with windows sized for machine lag — herdr reports the
@@ -47,6 +49,7 @@ export interface PaneEvent {
 }
 
 const SIDEBAR_METADATA_SOURCE = "agentsurface:sidebar";
+const UNTITLED_CONVERSATION = "untitled agent";
 const WORKTREE_MARKER = "";
 
 export function parsePaneEvent(eventJson: string): PaneEvent | null {
@@ -135,6 +138,54 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
   await invoke(call, reportArgs);
 }
 
+async function reportConversationValue(
+  call: HerdrCall,
+  paneId: string,
+  value: string,
+): Promise<void> {
+  await invoke(call, [
+    "pane",
+    "report-metadata",
+    paneId,
+    "--source",
+    SIDEBAR_METADATA_SOURCE,
+    "--token",
+    `conversation=${value}`,
+  ]);
+}
+
+/** Publish the pane's `$conversation` sidebar token. An unnamed tab holds
+ * the untitled placeholder until the namer lands a slug; a named tab's
+ * claim republishes the tab's current label instead — pane metadata does
+ * not survive a herdr restart, and the re-detection that follows a restore
+ * is what puts the token back. Runs to completion before the namer starts,
+ * so the namer's slug report is always the later write. */
+export async function reportConversationToken(
+  call: HerdrCall,
+  paneId: string,
+  stateDir: string,
+): Promise<void> {
+  const paneResult = (await invoke(call, ["pane", "get", paneId])) as {
+    pane?: { tab_id?: unknown };
+  } | null;
+  const tabId = paneResult?.pane?.tab_id;
+  if (typeof tabId !== "string" || tabId === "") {
+    throw new HerdrError("herdr's pane response named no tab");
+  }
+  let value = UNTITLED_CONVERSATION;
+  if (readClaim(claimPath(stateDir, tabId)).state === "named") {
+    const tabResult = (await invoke(call, ["tab", "get", tabId])) as {
+      tab?: { label?: unknown };
+    } | null;
+    const label = tabResult?.tab?.label;
+    if (typeof label !== "string" || label === "") {
+      throw new HerdrError("herdr's tab response named no label");
+    }
+    value = label;
+  }
+  await reportConversationValue(call, paneId, value);
+}
+
 export interface PaneSession {
   tabId: string;
   harness: HarnessName;
@@ -195,6 +246,10 @@ export function createSlugAttempt(
 }
 
 type Claim = { state: "pending"; pid: number } | { state: "named" } | { state: "absent" };
+
+function claimPath(stateDir: string, tabId: string): string {
+  return join(stateDir, "named-tabs", tabId);
+}
 
 function readClaim(path: string): Claim {
   let content: string;
@@ -303,9 +358,8 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
     await sleep(sessionPollMs);
   }
 
-  const claimDir = join(options.stateDir, "named-tabs");
-  const claim = join(claimDir, session.tabId);
-  mkdirSync(claimDir, { recursive: true });
+  const claim = claimPath(options.stateDir, session.tabId);
+  mkdirSync(join(options.stateDir, "named-tabs"), { recursive: true });
   if (!acquireClaim(claim, pid, pidAlive)) return 0;
 
   let promptDeadline = now() + promptTimeoutMs;
@@ -320,6 +374,12 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
         return 1;
       }
       writeFileSync(claim, "named\n");
+      try {
+        await reportConversationValue(options.call, event.paneId, outcome.value);
+      } catch (error) {
+        // The tab is named; the next detection republishes the token from it.
+        console.error(`name-tab: conversation token failed: ${(error as Error).message}`);
+      }
       return 0;
     }
     if (outcome.kind === "failed") {
@@ -367,15 +427,22 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
   }
   const call = createHerdrCall(env);
   const event = parsePaneEvent(eventJson);
-  // The token rides detection only: a pane's project does not move on a
-  // status transition, and transitions fire every turn boundary. Publishing
-  // runs beside the namer, off naming's critical path.
-  const token =
-    event !== null && event.kind === "agent_detected" && !event.released
-      ? reportSidebarProjectToken(call, event.paneId).catch((error: Error) => {
-          console.error(`name-tab: sidebar project token failed: ${error.message}`);
-        })
-      : Promise.resolve();
+  // The tokens ride detection only: neither a pane's project nor its tab's
+  // named state moves on a status transition, and transitions fire every
+  // turn boundary. The project token publishes beside the namer, off
+  // naming's critical path; the conversation token publishes before it, so
+  // the namer's slug report is always the later write.
+  let token: Promise<void> = Promise.resolve();
+  if (event !== null && event.kind === "agent_detected" && !event.released) {
+    token = reportSidebarProjectToken(call, event.paneId).catch((error: Error) => {
+      console.error(`name-tab: sidebar project token failed: ${error.message}`);
+    });
+    try {
+      await reportConversationToken(call, event.paneId, stateDir);
+    } catch (error) {
+      console.error(`name-tab: conversation token failed: ${(error as Error).message}`);
+    }
+  }
   const code = await runTabNamer({
     call,
     stateDir,
