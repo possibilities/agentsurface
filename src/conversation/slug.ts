@@ -14,6 +14,7 @@ import {
   stripSlashCommand,
 } from "./prompt.ts";
 import { parseHarnessName, resolveTranscript } from "./resolve.ts";
+import { storeSlug } from "./store.ts";
 
 /**
  * `conversation slug <harness> <id-or-path>`: derive a short list-ready
@@ -87,5 +88,9 @@ export async function conversationSlug(
     buildInstruction(excerpt),
     crypto.randomUUID(),
   );
-  return generateSlug(invocation, createInferenceRunner(env));
+  const slug = await generateSlug(invocation, createInferenceRunner(env));
+  // Inference was paid; the store remembers it so read-only surfaces (the
+  // resume picker's `conversation describe`) never pay again.
+  storeSlug(env, home, path, slug);
+  return slug;
 }

@@ -5,6 +5,7 @@ export const TOP_HELP = `agentsurface — fleet integrations over the herdr surf
 Usage:
   agentsurface host [--] <command> [args…]
   agentsurface conversation slug <harness> <session-id-or-path>
+  agentsurface conversation describe < requests.jsonl
   agentsurface agents [--all]
   agentsurface message <target> "<text>" [--wait-unblocked] [--timeout <ms>]
   agentsurface --help | --version
@@ -21,7 +22,15 @@ Commands:
             Print a short list-ready slug for a conversation, derived from
             its first user prompt by the conversation's own harness (claude,
             codex, or pi) at the catalog's metadata level. Exit 3: no such
-            transcript; exit 4: transcript holds no user prompt yet.
+            transcript; exit 4: transcript holds no user prompt yet. Every
+            computed slug is persisted to the slug store, so read-only
+            surfaces never pay for inference.
+  conversation describe
+            The bulk, read-only half: JSON lines on stdin — {"harness",
+            "path"} per transcript — answer as {"path", "slug", "excerpt"}
+            lines: the stored slug when naming ever computed one (never
+            computed here), and the first-prompt excerpt read from the
+            transcript head. Built for the resume picker's listing.
   agents    List the surface's live agents — name (the tab's label), session
             id, harness, status, cwd. Agents in the caller's workspace by
             default; --all lists the whole session.

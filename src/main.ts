@@ -80,6 +80,16 @@ async function main(argv: string[]): Promise<number> {
   }
   if (first === "conversation") {
     const second = argv[1];
+    if (second === "describe") {
+      if (argv.length > 2) {
+        console.error("conversation describe reads its requests from stdin and takes no arguments");
+        return 2;
+      }
+      const { runDescribe } = await import("./conversation/describe.ts");
+      const stdin = await new Response(process.stdin as unknown as ReadableStream).text();
+      process.stdout.write(runDescribe(stdin, process.env, process.env["HOME"] ?? ""));
+      return 0;
+    }
     if (second !== "slug") {
       console.error(
         second === undefined ? "conversation takes a subcommand" : `unknown subcommand "${second}"`,
