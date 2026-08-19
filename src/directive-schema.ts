@@ -55,6 +55,13 @@ export const sessionDirectiveSchema = z.strictObject({
     .boolean()
     .describe("Whether the created surface takes focus or opens in the background."),
   agent: agentSchema,
+  session_id: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "The native session id this directive's agent continues — set by resume emitters. When an agent pane on the surface already hosts this session, the host focuses that surface (per `focus`) instead of starting a duplicate agent; absent, the directive always starts one.",
+    ),
   intent: z
     .string()
     .nullable()

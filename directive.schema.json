@@ -44,6 +44,11 @@
       "additionalProperties": false,
       "description": "The agent to start in the created surface's root pane."
     },
+    "session_id": {
+      "description": "The native session id this directive's agent continues — set by resume emitters. When an agent pane on the surface already hosts this session, the host focuses that surface (per `focus`) instead of starting a duplicate agent; absent, the directive always starts one.",
+      "type": "string",
+      "minLength": 1
+    },
     "intent": {
       "anyOf": [
         {

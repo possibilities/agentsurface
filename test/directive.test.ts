@@ -301,3 +301,81 @@ describe("executeDirective", () => {
     expect(existsSync(path)).toBe(false);
   });
 });
+
+const LIVE_AGENTS: HerdrResponse = {
+  result: {
+    agents: [
+      {
+        name: "a-0011223344",
+        agent: "claude",
+        agent_status: "working",
+        agent_session: { value: "d65ef6c1-8d74-4b1e-989e-d439bd432b9a" },
+        workspace_id: "w3",
+        tab_id: "w3:t2",
+        pane_id: "w3:p5",
+        cwd: "/code/alpha",
+      },
+    ],
+  },
+};
+
+const RESUME_DIRECTIVE: SessionDirective = {
+  schema_version: 1,
+  cwd: "/code/alpha",
+  worktree: false,
+  focus: true,
+  agent: { kind: "claude", args: ["--x-resume", "d65ef6c1-8d74-4b1e-989e-d439bd432b9a"] },
+  session_id: "d65ef6c1-8d74-4b1e-989e-d439bd432b9a",
+  intent: null,
+  record: { tool: "agentchats" },
+};
+
+describe("executeDirective with a session_id", () => {
+  test("a session already live is focused, never resumed again", async () => {
+    const { call, calls } = fake([LIVE_AGENTS, { result: {} }]);
+    const path = logPath();
+    await executeDirective(call, path, RESUME_DIRECTIVE);
+
+    expect(calls[0]).toEqual(["agent", "list"]);
+    expect(calls).toContainEqual(["workspace", "focus", "w3"]);
+    expect(calls).toContainEqual(["tab", "focus", "w3:t2"]);
+    expect(calls.some((args) => args.includes("create") || args.includes("start"))).toBe(false);
+    const record = JSON.parse(readFileSync(path, "utf8").trim());
+    expect(record.focused_existing).toBe(true);
+    expect(record.workspace).toBe("w3");
+    expect(record.agent).toBe("a-0011223344");
+    expect(record.tool).toBe("agentchats");
+  });
+
+  test("an unfocused directive leaves a live session exactly where it is", async () => {
+    const { call, calls } = fake([LIVE_AGENTS]);
+    const path = logPath();
+    await executeDirective(call, path, { ...RESUME_DIRECTIVE, focus: false });
+
+    expect(calls).toEqual([["agent", "list"]]);
+    const record = JSON.parse(readFileSync(path, "utf8").trim());
+    expect(record.focused_existing).toBe(true);
+  });
+
+  test("a session not on the surface resumes normally", async () => {
+    const { call, calls } = fake([
+      { result: { agents: [] } },
+      { result: { panes: [] } },
+      { result: { workspaces: [] } },
+      CREATED,
+      { result: { agents: [] } },
+      { result: {} },
+    ]);
+    const path = logPath();
+    await executeDirective(call, path, { ...RESUME_DIRECTIVE, focus: false });
+
+    expect(calls[0]).toEqual(["agent", "list"]);
+    const start = calls.find((args) => args[0] === "agent" && args[1] === "start") ?? [];
+    expect(start.slice(start.indexOf("--") + 1)).toEqual([
+      "--x-resume",
+      "d65ef6c1-8d74-4b1e-989e-d439bd432b9a",
+    ]);
+    const record = JSON.parse(readFileSync(path, "utf8").trim());
+    expect(record.focused_existing).toBeUndefined();
+  });
+});

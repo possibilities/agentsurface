@@ -157,6 +157,10 @@ export async function focusWorkspace(call: HerdrCall, workspaceId: string): Prom
   await invoke(call, ["workspace", "focus", workspaceId]);
 }
 
+export async function focusTab(call: HerdrCall, tabId: string): Promise<void> {
+  await invoke(call, ["tab", "focus", tabId]);
+}
+
 export interface WorkspaceSummary {
   workspaceId: string;
   label: string | null;

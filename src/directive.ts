@@ -5,10 +5,12 @@ import {
   createTab,
   createWorkspace,
   createWorktree,
+  focusTab,
   focusWorkspace,
   type HerdrCall,
   HerdrError,
   herdrBinary,
+  listAgents,
   listPanes,
   listWorkspaces,
   liveAgentNames,
@@ -66,6 +68,37 @@ async function startSession(
   directive: SessionDirective,
   intent: { path: string | null },
 ): Promise<void> {
+  // A directive that names its native session is a resume, and a session
+  // already live on the surface is not resumed again — its surface is
+  // focused (per the directive's own focus) and the record says so. The
+  // emitting tool cannot know this: reading surface state is the host's
+  // side of the protocol.
+  if (directive.session_id !== undefined) {
+    const live = (await listAgents(call)).find(
+      (agent) => agent.sessionValue === directive.session_id,
+    );
+    if (live !== undefined) {
+      if (directive.focus) {
+        await focusWorkspace(call, live.workspaceId);
+        await focusTab(call, live.tabId);
+      }
+      appendLaunch(logPath, {
+        ...directive.record,
+        at: new Date().toISOString(),
+        project: directive.cwd,
+        harness: directive.agent.kind,
+        worktree: directive.worktree,
+        branch: null,
+        workspace: live.workspaceId,
+        // The live agent may run under a name herdr released or one this
+        // executor never assigned; the record is bookkeeping either way.
+        agent: live.name ?? "",
+        named: live.name !== null,
+        focused_existing: true,
+      });
+      return;
+    }
+  }
   let surface: Awaited<ReturnType<typeof createWorkspace>>;
   if (directive.worktree) {
     surface = await createWorktree(call, { cwd: directive.cwd, focus: directive.focus });
