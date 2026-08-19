@@ -3,7 +3,7 @@
 # the source-linked fleet installs on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.9.0"
+version = "0.10.0"
 min_herdr_version = "0.8.0"
 description = "Launch agents, show subscription usage, control the voice console, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
@@ -25,6 +25,18 @@ placement = "popup"
 width = "80%"
 height = "80%"
 command = ["agentsurface", "host", "--", "agentlaunch", "--x-surface"]
+
+# The resume picker is the same host contract as the launch form: the host
+# resolves the active pane's cwd so the picker opens scoped to the project it
+# opened over, and each picked session becomes a herdr resume through the
+# stdout directive pipe.
+[[panes]]
+id = "chats"
+title = "Agentchats"
+placement = "popup"
+width = "80%"
+height = "80%"
+command = ["agentsurface", "host", "--", "agentchats", "search"]
 
 # Popup-bound fleet TUIs live together in this plugin. The wrapper preserves
 # the usage dialog's established escape-to-close behavior.
