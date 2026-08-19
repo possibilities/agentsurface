@@ -1,6 +1,6 @@
 /**
  * Generates `directive.schema.json` from the zod schema in
- * `src/directive-schema.ts` — the same schema the host validates sink lines
+ * `src/directive-schema.ts` — the same schema the host validates stream lines
  * with, so the published file cannot drift from what the host executes. A
  * schema is the protocol's documentation for the tools on the other side of
  * the handoff, and this generator refuses to emit an undocumented key.
@@ -14,7 +14,7 @@ import { sessionDirectiveSchema } from "../src/directive-schema.ts";
 
 const DIRECTIVE_TITLE = "agentsurface session directive";
 const DIRECTIVE_DESCRIPTION =
-  "One session directive: a single JSON line a surface-hosted tool appends to the file named by AGENTSURFACE_DIRECTIVES, describing a session for agentsurface to realize on the herdr surface. The surface-handoff-protocol wiki page is the contract; agentsurface validates every line strictly and refuses unknown keys and unknown schema_versions.";
+  "One session directive: a single JSON line a surface-hosted tool writes to its stdout — held as a pipe by `agentsurface host` while the tool renders on stderr — describing a session for agentsurface to realize on the herdr surface. The surface-handoff-protocol wiki page is the contract; agentsurface validates every line strictly and refuses unknown keys and unknown schema_versions.";
 
 type Schema = Record<string, unknown>;
 

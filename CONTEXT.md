@@ -9,16 +9,20 @@ detached. The tool is a black box with a terminal; directives are the only
 thing read back. _Avoid_: wrapper, launcher.
 
 **Session directive** — One schema-versioned JSON line a hosted tool
-appends to the sink, describing a session for the surface to realize: cwd,
+writes to its stdout, describing a session for the surface to realize: cwd,
 worktree, focus, the agent kind with its arguments, the composed intent,
 and opaque record extras. Strictly validated, hard version gate, published
 as `directive.schema.json`; the `surface-handoff-protocol` wiki page is
 the contract. _Avoid_: plan, launch request.
 
-**Sink** — The fresh per-run append-only file the host creates and names to
-its tool in `AGENTSURFACE_DIRECTIVES`; the host tails it for complete
-lines while the tool runs, and keeps it afterwards as evidence, pruned by
-age. _Avoid_: pipe, socket.
+**Directive stream** — The hosted tool's stdout, held as a pipe by the host
+while the tool renders on stderr; the host acts on each complete line as it
+flows. _Avoid_: sink (the file channel was the first spelling; the stream
+replaced it).
+
+**Evidence log** — The fresh per-run file under the state directory where
+the host appends every line it reads, valid or not, before acting; kept
+afterwards and pruned by age. _Avoid_: sink.
 
 **Launch** — Realizing one session directive: create the herdr workspace
 or worktree, start the agent in its root pane, deliver the intent.

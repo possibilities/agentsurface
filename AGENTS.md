@@ -37,15 +37,15 @@ re-implements neither side.
   user prompt yet) so machine callers can poll.
 - `host.ts` is the generic surface host: check herdr, resolve the context
   cwd (the focused pane's, asked of herdr — the popup does not inherit it),
-  create a fresh per-run sink file, and run the tool with the terminal and
-  `AGENTSURFACE_DIRECTIVES` naming the sink. While the tool runs, the host
-  tails the sink and spawns a detached `agentsurface execute-directive`
-  per complete line — a background submit launches while the tool's form
-  stays open, and the popup still closes the moment the tool exits, with a
-  final drain catching the submit that landed just before. A refused line
-  is notified and reported at exit; it never stops the stream. A tool that
-  exits nonzero holds the popup so its message can be read (130, the
-  operator's ctrl+c, excepted).
+  and run the tool with stdout piped while stdin and stderr stay the
+  popup's tty — the tool renders on stderr, and stdout is the directive
+  stream. The host reads the pipe as it flows and spawns a detached
+  `agentsurface execute-directive` per complete line — a background submit
+  launches while the tool's form stays open, and the popup still closes
+  the moment the tool exits. Every line read is appended to a per-run
+  evidence log first. A refused line is notified and reported at exit; it
+  never stops the stream. A tool that exits nonzero holds the popup so its
+  message can be read (130, the operator's ctrl+c, excepted).
 - `directive-schema.ts` is the protocol: the session directive as a strict
   zod schema, published as `directive.schema.json`, refusing unknown keys
   and unknown schema_versions. `directive.ts` is the detached half that
@@ -61,7 +61,7 @@ re-implements neither side.
   control characters, so the text itself cannot travel as an argument;
   agentlaunch appends the file's text as the final native token, which is
   why a startup dialog still cannot drop it. The executor prunes the spool
-  by age, and the host prunes old sinks the same way. JSON answers only;
+  by age, and the host prunes old evidence logs the same way. JSON answers only;
   success on stdout, errors on stderr.
 - `bus.ts` is the message bus. An agent's name on the bus is the label of
   the tab hosting its pane — the tab namer's slug, or a hand rename —
@@ -137,9 +137,9 @@ re-implements neither side.
   herdr's own typed-input path; this repository never writes to a pane.
   Delivery is not receipt: the confirmation carries the target's status so
   the sender knows a working harness queued the message.
-- A hosted tool is a black box with a terminal: the host lends it the tty,
-  the cwd, and the sink, and reads nothing back but directives and the
-  exit code. Feedback about a directive's fate is the operator's (herdr
+- A hosted tool is a black box with a terminal: the host lends it the tty
+  on stdin/stderr, the cwd, and the stdout pipe, and reads nothing back
+  but directives and the exit code. Feedback about a directive's fate is the operator's (herdr
   notifications), never the tool's.
 - A launch fails only when no harness ran. `herdr agent start` spawns and
   then waits to confirm the launch alias; every outcome of that wait —

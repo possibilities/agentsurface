@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "agentsurface session directive",
-  "description": "One session directive: a single JSON line a surface-hosted tool appends to the file named by AGENTSURFACE_DIRECTIVES, describing a session for agentsurface to realize on the herdr surface. The surface-handoff-protocol wiki page is the contract; agentsurface validates every line strictly and refuses unknown keys and unknown schema_versions.",
+  "description": "One session directive: a single JSON line a surface-hosted tool writes to its stdout — held as a pipe by `agentsurface host` while the tool renders on stderr — describing a session for agentsurface to realize on the herdr surface. The surface-handoff-protocol wiki page is the contract; agentsurface validates every line strictly and refuses unknown keys and unknown schema_versions.",
   "type": "object",
   "properties": {
     "schema_version": {

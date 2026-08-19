@@ -7,14 +7,14 @@ one integration; the first is `host`, the second `conversation slug`.
 ## Host
 
 ```sh
-agentsurface host -- agentlaunch --x-surface
+agentsurface host -- agentlaunch x-surface
 ```
 
 `host` runs one fleet TUI on the current terminal (usually a herdr popup)
-and realizes every **session directive** it emits. The host creates a fresh
-sink file, names it to the tool in `AGENTSURFACE_DIRECTIVES`, resolves the
-focused pane's cwd, and runs the tool there; each JSON line the tool
-appends to the sink becomes — at once, detached from the tool — a herdr
+and realizes every **session directive** it emits. The host resolves the
+focused pane's cwd and runs the tool there with stdout held as a pipe —
+the tool renders on stderr, which stays the popup's tty; each JSON line
+the tool writes to stdout becomes — at once, detached from the tool — a herdr
 workspace (or worktree, or a tab in the workspace already hosting the
 project) with an agent started in its root pane and the directive's intent
 delivered as the first prompt (`herdr agent start` runs the bare harness
@@ -31,7 +31,7 @@ directive's fate — execution failures reach the operator as herdr
 notifications, and a refused directive is reported without stopping the
 stream.
 
-The first hosted tool is agentlaunch's `--x-surface` launch form — the
+The first hosted tool is agentlaunch's `x-surface` launch form — the
 one-screen, prompt-first launcher that used to live in this repository.
 Its intent editor, project/harness/model/effort choosers, worktree toggle,
 priming, drafts, and project-frequency ordering are all agentlaunch's now;
@@ -131,8 +131,8 @@ AgentSurface has no config file — project roots and priming moved to
 agentlaunch's config with the launch form. The launch log at
 `~/.local/state/agentsurface/launches.jsonl` records each realized
 directive (with the emitting tool's record extras riding along), and
-`~/.local/state/agentsurface/directives/` keeps each host run's sink as
-evidence, pruned by age. Both are bookkeeping; deleting them loses only
+`~/.local/state/agentsurface/directives/` keeps each host run's directive
+stream as an evidence log, pruned by age. Both are bookkeeping; deleting them loses only
 history.
 
 ## Development

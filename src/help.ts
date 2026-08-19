@@ -11,11 +11,11 @@ Usage:
 
 Commands:
   host      Run a fleet TUI on this terminal and realize every session
-            directive it emits. The host names a fresh sink file to the tool
-            in AGENTSURFACE_DIRECTIVES; each JSON line the tool appends
-            becomes a herdr workspace (or worktree) with an agent started in
-            it, at once and detached — the launch form is
-            \`agentsurface host -- agentlaunch --x-surface\`. Directive
+            directive it emits. The host holds the tool's stdout as a pipe
+            (the tool renders on stderr, still the popup's tty); each JSON
+            line read becomes a herdr workspace (or worktree) with an agent
+            started in it, at once and detached — the launch form is
+            \`agentsurface host -- agentlaunch x-surface\`. Directive
             failures reach the operator as herdr notifications.
   conversation slug
             Print a short list-ready slug for a conversation, derived from
@@ -35,7 +35,7 @@ Commands:
 Files:
   directive.schema.json (checked in)            the session directive format
   ~/.local/state/agentsurface/launches.jsonl    launch log of realized directives
-  ~/.local/state/agentsurface/directives/       per-run directive sinks
+  ~/.local/state/agentsurface/directives/       per-run directive evidence logs
 
 Requires a running herdr session. The surface-handoff-protocol wiki page is
 the directive contract.

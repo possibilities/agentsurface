@@ -13,9 +13,6 @@ import { CliError } from "./errors.ts";
 
 export const DIRECTIVE_SCHEMA_VERSION = 1;
 
-/** The env var a host sets to name the directive sink for its hosted tool. */
-export const DIRECTIVE_SINK_ENV = "AGENTSURFACE_DIRECTIVES";
-
 const agentSchema = z
   .strictObject({
     kind: z
@@ -74,7 +71,7 @@ export const sessionDirectiveSchema = z.strictObject({
 
 export type SessionDirective = z.infer<typeof sessionDirectiveSchema>;
 
-/** One sink line, strictly validated. The version gate is deliberate: a
+/** One stream line, strictly validated. The version gate is deliberate: a
  * directive this host does not understand must fail loudly, never execute
  * approximately. */
 export function parseDirective(line: string): SessionDirective {

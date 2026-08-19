@@ -1,7 +1,7 @@
-import { closeSync, mkdirSync, openSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { notifyLaunchFailure, pruneSpool } from "./directive.ts";
-import { DIRECTIVE_SINK_ENV, parseDirective } from "./directive-schema.ts";
+import { parseDirective } from "./directive-schema.ts";
 import { UsageError } from "./errors.ts";
 import { createHerdrCall, type HerdrCall, invoke } from "./herdr.ts";
 import type { Environ } from "./paths.ts";
@@ -9,16 +9,14 @@ import { launchLogPath } from "./state.ts";
 
 /**
  * The generic surface host: run one fleet TUI on this terminal and realize
- * every session directive it emits. The host creates a fresh sink file,
- * names it to the tool in AGENTSURFACE_DIRECTIVES, and tails it while the
- * tool runs — each complete line becomes a detached
+ * every session directive it emits. The host holds the tool's stdout as a
+ * pipe — the tool renders on stderr, which stays the popup's tty — and each
+ * complete JSON line it reads becomes a detached
  * `agentsurface execute-directive` at once, so a background submit launches
  * while the form stays open, and the popup still closes the moment the tool
  * exits. The tool never learns what became of a directive; execution
  * failures reach the operator as herdr notifications.
  */
-
-const POLL_MS = 150;
 
 /** Complete lines only: a directive is one line, and a partial tail is a
  * write still in flight — carried to the next read, never parsed early. */
@@ -34,18 +32,20 @@ export function splitCompleteLines(buffer: string): { lines: string[]; rest: str
   };
 }
 
-/** A fresh per-run sink under the state directory, kept afterwards as the
- * submitted-work evidence log and pruned by age like the intent spool. */
-export function createDirectiveSink(env: Environ, home: string, now: number = Date.now()): string {
+/** A fresh per-run evidence log under the state directory: every line read
+ * off the tool's stdout, valid or not, appended as received — the submitted
+ * work survives whatever happens downstream. Pruned by age like the intent
+ * spool. */
+export function createDirectiveLog(env: Environ, home: string, now: number = Date.now()): string {
   const spool = join(dirname(launchLogPath(env, home)), "directives");
   mkdirSync(spool, { recursive: true });
-  pruneSpool(spool, now, SINK_MAX_AGE_MS);
+  pruneSpool(spool, now, LOG_MAX_AGE_MS);
   const path = join(spool, `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}.jsonl`);
   writeFileSync(path, "");
   return path;
 }
 
-const SINK_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** The popup does not inherit the focused pane's cwd, but herdr names the
  * pane in the spawn environment; ask it. Outside a binding, the process cwd
@@ -112,52 +112,53 @@ export async function runHost(env: Environ, home: string, argv: string[]): Promi
   await invoke(call, ["workspace", "list"]); // herdr reachability, before drawing
   const cwd = await contextCwd(call, env);
   const logPath = launchLogPath(env, home);
-  const sink = createDirectiveSink(env, home);
+  const evidence = createDirectiveLog(env, home);
 
+  // stdout piped is the whole protocol; stdin and stderr stay the popup's
+  // tty, where the tool reads keys and renders.
   const tool = Bun.spawn(command as [string, ...string[]], {
     stdin: "inherit",
-    stdout: "inherit",
+    stdout: "pipe",
     stderr: "inherit",
     cwd,
-    env: { ...env, [DIRECTIVE_SINK_ENV]: sink } as Record<string, string>,
+    env: env as Record<string, string>,
   });
 
-  // The tail: consume from the last read offset, act on complete lines. A
-  // bad line cannot stop the stream — it is reported and the tail goes on.
-  let offset = 0;
-  let carry = "";
   const faults: string[] = [];
-  const drain = (): void => {
-    let size: number;
+  const act = (line: string): void => {
     try {
-      size = statSync(sink).size;
+      appendFileSync(evidence, `${line}\n`);
     } catch {
-      return; // The sink vanishing mid-run is itself reported at exit.
+      // Evidence is insurance, never a launch blocker.
     }
-    if (size <= offset) return;
-    const text = readFileSync(sink, "utf8");
-    const fresh = text.slice(offset);
-    offset = text.length;
-    const { lines, rest } = splitCompleteLines(carry + fresh);
-    carry = rest;
-    for (const line of lines) {
-      try {
-        parseDirective(line);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        faults.push(message);
-        void notifyLaunchFailure(env, `directive refused: ${message}`);
-        continue;
-      }
-      spawnDetachedExecutor(env, logPath, line);
+    try {
+      parseDirective(line);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      faults.push(message);
+      void notifyLaunchFailure(env, `directive refused: ${message}`);
+      return;
     }
+    spawnDetachedExecutor(env, logPath, line);
   };
 
-  const tail = setInterval(drain, POLL_MS);
-  const code = await tool.exited;
-  clearInterval(tail);
-  drain(); // The final submit lands right before exit; catch it always.
+  // Read the pipe as it flows: complete lines act at once; a partial line is
+  // a write still in flight and carries to the next chunk. A bad line cannot
+  // stop the stream — it is reported and the reading goes on.
+  const decoder = new TextDecoder();
+  let carry = "";
+  for await (const chunk of tool.stdout as AsyncIterable<Uint8Array>) {
+    const { lines, rest } = splitCompleteLines(carry + decoder.decode(chunk, { stream: true }));
+    carry = rest;
+    for (const line of lines) act(line);
+  }
+  // The stream is closed; a trailing unterminated line is still a submit —
+  // the spec asks for terminated lines, but losing a launch to a missing
+  // newline would be pedantry.
+  carry += decoder.decode();
+  if (carry.trim() !== "") act(carry.trim());
 
+  const code = await tool.exited;
   if (faults.length > 0) {
     console.error(`error: ${faults.length} directive${faults.length > 1 ? "s" : ""} refused:`);
     for (const fault of faults) console.error(`  ${fault}`);

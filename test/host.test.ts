@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { HerdrCall, HerdrResponse } from "../src/herdr.ts";
-import { contextCwd, createDirectiveSink, splitCompleteLines } from "../src/host.ts";
+import { contextCwd, createDirectiveLog, splitCompleteLines } from "../src/host.ts";
 
 let temps: string[] = [];
 
@@ -32,10 +32,10 @@ describe("splitCompleteLines", () => {
   });
 });
 
-describe("createDirectiveSink", () => {
-  test("creates a fresh empty sink under the state spool and prunes stale ones", () => {
+describe("createDirectiveLog", () => {
+  test("creates a fresh empty evidence log under the state spool and prunes stale ones", () => {
     const h = home();
-    const first = createDirectiveSink({}, h);
+    const first = createDirectiveLog({}, h);
     expect(existsSync(first)).toBe(true);
     expect(readFileSync(first, "utf8")).toBe("");
     expect(dirname(first).endsWith(join("agentsurface", "directives"))).toBe(true);
@@ -44,9 +44,9 @@ describe("createDirectiveSink", () => {
     writeFileSync(stale, "");
     const old = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
     utimesSync(stale, old, old);
-    const second = createDirectiveSink({}, h);
+    const second = createDirectiveLog({}, h);
     expect(existsSync(stale)).toBe(false);
-    expect(existsSync(first)).toBe(true); // fresh sinks survive the prune
+    expect(existsSync(first)).toBe(true); // fresh logs survive the prune
     expect(second).not.toBe(first);
   });
 });
