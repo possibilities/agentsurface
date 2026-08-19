@@ -22,7 +22,8 @@ function scratch(): string {
   return temp;
 }
 
-const jsonl = (lines: unknown[]): string => `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+const jsonl = (lines: unknown[]): string =>
+  `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
 
 function claudeTranscript(prompt: string): string {
   return jsonl([

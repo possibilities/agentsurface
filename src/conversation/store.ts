@@ -34,12 +34,7 @@ export function readStoredSlug(env: Environ, home: string, transcriptPath: strin
 }
 
 /** Best-effort: a slug that cannot be stored still names its tab. */
-export function storeSlug(
-  env: Environ,
-  home: string,
-  transcriptPath: string,
-  slug: string,
-): void {
+export function storeSlug(env: Environ, home: string, transcriptPath: string, slug: string): void {
   try {
     mkdirSync(slugStoreDirectory(env, home), { recursive: true });
     writeFileSync(slugPath(env, home, transcriptPath), `${slug}\n`);
