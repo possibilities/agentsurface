@@ -15,7 +15,7 @@ Commands:
             (the tool renders on stderr, still the popup's tty); each JSON
             line read becomes a herdr workspace (or worktree) with an agent
             started in it, at once and detached — the launch form is
-            \`agentsurface host -- agentlaunch x-surface\`. Directive
+            \`agentsurface host -- agentlaunch --x-surface\`. Directive
             failures reach the operator as herdr notifications.
   conversation slug
             Print a short list-ready slug for a conversation, derived from

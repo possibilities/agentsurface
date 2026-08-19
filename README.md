@@ -7,7 +7,7 @@ one integration; the first is `host`, the second `conversation slug`.
 ## Host
 
 ```sh
-agentsurface host -- agentlaunch x-surface
+agentsurface host -- agentlaunch --x-surface
 ```
 
 `host` runs one fleet TUI on the current terminal (usually a herdr popup)
@@ -31,7 +31,7 @@ directive's fate — execution failures reach the operator as herdr
 notifications, and a refused directive is reported without stopping the
 stream.
 
-The first hosted tool is agentlaunch's `x-surface` launch form — the
+The first hosted tool is agentlaunch's `--x-surface` launch form — the
 one-screen, prompt-first launcher that used to live in this repository.
 Its intent editor, project/harness/model/effort choosers, worktree toggle,
 priming, drafts, and project-frequency ordering are all agentlaunch's now;
