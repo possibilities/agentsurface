@@ -37,6 +37,11 @@ once the dialog clears. _Avoid_: task, message.
 necessarily a git repository; only the worktree option needs one.
 _Avoid_: repo.
 
+**Project workspace** — An ordinary Herdr workspace whose label matches a
+project's basename. A pane temporarily working in the project does not make
+an unrelated workspace its project workspace; stable pane cwd only
+disambiguates duplicate labels. _Avoid_: any workspace containing the project.
+
 **Surface** — Herdr, the terminal workspace manager the fleet launches onto.
 AgentSurface drives it only through the `herdr` CLI's socket API.
 

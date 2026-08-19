@@ -148,8 +148,10 @@ re-implements neither side.
   intent rides the argv, so the harness submits it on its own schedule. A
   genuine failure's notification names the spool file holding the prompt.
 - A project already on the surface gets a tab in its workspace; a
-  workspace is created only when none hosts the project (a pane working
-  inside it, else its name as the label).
+  workspace is created only when none hosts the project. The project's
+  basename must match the workspace label; a transient pane foreground cwd
+  never gives an unrelated workspace ownership. Stable pane cwd only
+  disambiguates duplicate labels.
 - Launch records append to the state log; losing or garbling it only
   flattens the project ordering.
 

@@ -205,9 +205,11 @@ export function pruneSpool(spool: string, now: number, maxAgeMs: number): void {
   }
 }
 
-/** The workspace already hosting a project: one with a pane working inside
- * it, else one carrying the project's name as its label (a pane may have
- * wandered elsewhere since). Null means the project is not on the surface. */
+/** The workspace already hosting a project: one carrying the project's name
+ * as its label. Herdr's foreground cwd is transient — a shell or popup can
+ * visit another project without changing which project its workspace hosts.
+ * When duplicate labels exist, a pane's stable cwd breaks the tie. Null means
+ * the project is not on the surface. */
 export async function findProjectWorkspace(
   call: HerdrCall,
   projectPath: string,
@@ -215,11 +217,12 @@ export async function findProjectWorkspace(
   const inside = (cwd: string | null): boolean =>
     cwd !== null && (cwd === projectPath || cwd.startsWith(`${projectPath}/`));
   const panes = await listPanes(call);
-  const byCwd = panes.find((pane) => inside(pane.foregroundCwd) || inside(pane.cwd));
-  if (byCwd !== undefined) return byCwd.workspaceId;
   const label = basename(projectPath);
-  const byLabel = (await listWorkspaces(call)).find((workspace) => workspace.label === label);
-  return byLabel?.workspaceId ?? null;
+  const candidates = (await listWorkspaces(call)).filter((workspace) => workspace.label === label);
+  if (candidates.length === 0) return null;
+  const candidateIds = new Set(candidates.map((workspace) => workspace.workspaceId));
+  const byStableCwd = panes.find((pane) => candidateIds.has(pane.workspaceId) && inside(pane.cwd));
+  return byStableCwd?.workspaceId ?? candidates[0]!.workspaceId;
 }
 
 /** The failure as the operator should read it: what went wrong, and where the

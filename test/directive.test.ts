@@ -64,15 +64,26 @@ const CREATED: HerdrResponse = {
 };
 
 describe("findProjectWorkspace", () => {
-  test("a pane working inside the project wins; a label match backs it up", () => {
-    const byCwd = fake([
+  test("the project label establishes ownership; stable cwd disambiguates duplicates", () => {
+    const byStableCwd = fake([
       {
         result: {
-          panes: [{ workspace_id: "w7", cwd: "/elsewhere", foreground_cwd: "/code/alpha/sub" }],
+          panes: [
+            { workspace_id: "w3", cwd: "/elsewhere", foreground_cwd: "/code/alpha/sub" },
+            { workspace_id: "w7", cwd: "/code/alpha/sub", foreground_cwd: "/elsewhere" },
+          ],
+        },
+      },
+      {
+        result: {
+          workspaces: [
+            { workspace_id: "w3", label: "alpha" },
+            { workspace_id: "w7", label: "alpha" },
+          ],
         },
       },
     ]);
-    expect(findProjectWorkspace(byCwd.call, "/code/alpha")).resolves.toBe("w7");
+    expect(findProjectWorkspace(byStableCwd.call, "/code/alpha")).resolves.toBe("w7");
 
     const byLabel = fake([
       { result: { panes: [{ workspace_id: "w7", cwd: "/elsewhere", foreground_cwd: null }] } },
@@ -85,6 +96,25 @@ describe("findProjectWorkspace", () => {
       { result: { workspaces: [{ workspace_id: "w3", label: "other" }] } },
     ]);
     expect(findProjectWorkspace(absent.call, "/code/alpha")).resolves.toBeNull();
+  });
+
+  test("an unrelated workspace does not own a project merely because a pane visits it", () => {
+    const unrelated = fake([
+      {
+        result: {
+          panes: [
+            {
+              workspace_id: "w7",
+              cwd: "/code/agentvoice",
+              foreground_cwd: "/code/alpha",
+            },
+          ],
+        },
+      },
+      { result: { workspaces: [{ workspace_id: "w7", label: "agentvoice" }] } },
+    ]);
+
+    expect(findProjectWorkspace(unrelated.call, "/code/alpha")).resolves.toBeNull();
   });
 });
 
@@ -160,6 +190,7 @@ describe("executeDirective", () => {
           panes: [{ workspace_id: "w7", cwd: "/code/alpha", foreground_cwd: "/code/alpha" }],
         },
       },
+      { result: { workspaces: [{ workspace_id: "w7", label: "alpha" }] } },
       { result: { tab: { tab_id: "w7:t4" }, root_pane: { pane_id: "w7:p9" } } },
       { result: {} },
       { result: { agents: [] } },
@@ -168,7 +199,7 @@ describe("executeDirective", () => {
     const path = logPath();
     await executeDirective(call, path, { ...DIRECTIVE, focus: true });
 
-    expect(calls[1]).toEqual([
+    expect(calls[2]).toEqual([
       "tab",
       "create",
       "--workspace",
@@ -177,7 +208,7 @@ describe("executeDirective", () => {
       "/code/alpha",
       "--focus",
     ]);
-    expect(calls[2]).toEqual(["workspace", "focus", "w7"]);
+    expect(calls[3]).toEqual(["workspace", "focus", "w7"]);
     const record = JSON.parse(readFileSync(path, "utf8").trim());
     expect(record.workspace).toBe("w7");
     expect(record.agent).toMatch(/^a-[0-9a-f]{10}$/);
