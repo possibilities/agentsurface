@@ -631,15 +631,24 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
   };
 
   /** Freeze the plan and hand it to the detached executor; the popup owes
-   * the operator an immediate close (or, unfocused, the next blank form). */
+   * the operator an immediate close (or, unfocused, the next blank form).
+   *
+   * One submit per window: the child-liveness wait below keeps the form on
+   * screen (phase still "form", listener still attached) for up to 300ms
+   * after enter, and a key-repeat or second enter landing there would run
+   * the whole pipeline again — two executors, two tabs, the same prompt
+   * twice. The flag lifts only where the form comes back: failure, or the
+   * launch-another reset. */
+  let submitting = false;
   const submitLaunch = async (focus: boolean): Promise<void> => {
-    if (state.phase.kind !== "form") return;
+    if (submitting || state.phase.kind !== "form") return;
     state.prompt = intent.plainText;
     const plan = buildPlan(state);
     if (plan === null) {
       paint();
       return;
     }
+    submitting = true;
     // The submitted plan is persisted before the spawn, and the draft
     // clears only once the child is confirmed alive: the intent is
     // recoverable at every instant, whatever dies.
@@ -648,6 +657,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
     try {
       child = spawnDetachedLaunch(env, logPath, { ...plan, focus });
     } catch (error) {
+      submitting = false;
       failRun(state, error instanceof Error ? error.message : String(error));
       paint();
       return;
@@ -660,6 +670,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       Bun.sleep(300).then(() => null as number | null),
     ]);
     if (early !== null && early !== 0) {
+      submitting = false;
       failRun(state, `launch handoff died at start (exit ${early}) · see executor.log`);
       paint();
       return;
@@ -670,6 +681,7 @@ export async function runLaunch(env: Environ, home: string): Promise<number> {
       shutdown(0);
       return;
     }
+    submitting = false;
     resetForAnother(
       state,
       `started ${plan.harness} ${GLYPHS.sep} ${plan.project.display}${plan.worktree ? ` ${GLYPHS.sep} worktree` : ""}`,
