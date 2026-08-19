@@ -10,18 +10,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { UsageError } from "../src/errors.ts";
-import type { HerdrCall, HerdrResponse } from "../src/herdr.ts";
 import {
-  type DetachedLaunch,
-  executeLaunch,
+  executeDirective,
   findProjectWorkspace,
   LaunchFailure,
   launchFailureBody,
-  parseDetachedLaunch,
-  primedPrompt,
   writeIntentFile,
-} from "../src/launch/executor.ts";
+} from "../src/directive.ts";
+import type { SessionDirective } from "../src/directive-schema.ts";
+import type { HerdrCall, HerdrResponse } from "../src/herdr.ts";
 
 let temps: string[] = [];
 
@@ -31,7 +28,7 @@ afterEach(() => {
 });
 
 function logPath(): string {
-  const temp = mkdtempSync(join(tmpdir(), "agentsurface-executor-"));
+  const temp = mkdtempSync(join(tmpdir(), "agentsurface-directive-"));
   temps.push(temp);
   return join(temp, "launches.jsonl");
 }
@@ -48,16 +45,14 @@ function fake(responses: HerdrResponse[]): { call: HerdrCall; calls: string[][] 
   return { call, calls };
 }
 
-const PLAN: DetachedLaunch = {
-  project: { path: "/code/alpha", display: "~/code/alpha", count: 0 },
+const DIRECTIVE: SessionDirective = {
+  schema_version: 1,
+  cwd: "/code/alpha",
   worktree: false,
-  priming: null,
-  harness: "claude",
-  model: "fable",
-  effort: "max",
-  level: "fable:max",
-  prompt: "fix it",
   focus: false,
+  agent: { kind: "claude", args: ["--x-level", "fable:max"] },
+  intent: "fix it",
+  record: { model: "fable", effort: "max", priming: null },
 };
 
 const CREATED: HerdrResponse = {
@@ -67,21 +62,6 @@ const CREATED: HerdrResponse = {
     root_pane: { pane_id: "w9:p1" },
   },
 };
-
-describe("parseDetachedLaunch", () => {
-  test("round-trips a plan and refuses anything else", () => {
-    expect(parseDetachedLaunch(JSON.stringify(PLAN))).toEqual(PLAN);
-    for (const bad of ["", "not json", JSON.stringify({ project: {} })]) {
-      let caught: unknown;
-      try {
-        parseDetachedLaunch(bad);
-      } catch (error) {
-        caught = error;
-      }
-      expect(caught).toBeInstanceOf(UsageError);
-    }
-  });
-});
 
 describe("findProjectWorkspace", () => {
   test("a pane working inside the project wins; a label match backs it up", () => {
@@ -108,24 +88,6 @@ describe("findProjectWorkspace", () => {
   });
 });
 
-describe("primedPrompt", () => {
-  test("each harness spells its own skill prefix; empty intents prime alone", () => {
-    expect(primedPrompt({ harness: "claude", prompt: "fix it", priming: "collab" })).toBe(
-      "/collab fix it",
-    );
-    expect(primedPrompt({ harness: "pi", prompt: "fix it", priming: "build" })).toBe(
-      "/build fix it",
-    );
-    expect(primedPrompt({ harness: "codex", prompt: "fix it", priming: "collab" })).toBe(
-      "$collab fix it",
-    );
-    expect(primedPrompt({ harness: "codex", prompt: "", priming: "orchestrate" })).toBe(
-      "$orchestrate",
-    );
-    expect(primedPrompt({ harness: "claude", prompt: "fix it", priming: null })).toBe("fix it");
-  });
-});
-
 describe("writeIntentFile", () => {
   test("stale spool entries are pruned by age; fresh ones survive", () => {
     const state = dirname(logPath());
@@ -147,7 +109,7 @@ describe("writeIntentFile", () => {
   });
 });
 
-describe("executeLaunch", () => {
+describe("executeDirective", () => {
   test("creates an unfocused workspace when the project is absent, retrying a taken name", async () => {
     const { call, calls } = fake([
       { result: { panes: [] } },
@@ -159,7 +121,7 @@ describe("executeLaunch", () => {
       { result: {} },
     ]);
     const path = logPath();
-    await executeLaunch(call, path, PLAN);
+    await executeDirective(call, path, DIRECTIVE);
 
     expect(calls[2]).toEqual([
       "workspace",
@@ -204,7 +166,7 @@ describe("executeLaunch", () => {
       { result: {} },
     ]);
     const path = logPath();
-    await executeLaunch(call, path, { ...PLAN, focus: true });
+    await executeDirective(call, path, { ...DIRECTIVE, focus: true });
 
     expect(calls[1]).toEqual([
       "tab",
@@ -230,18 +192,18 @@ describe("executeLaunch", () => {
       { result: {} },
     ]);
     const path = logPath();
-    const prompt = "Survey the fleet.\n\nThen 'quotes', a\ttab, and $dollars.";
-    await executeLaunch(call, path, { ...PLAN, prompt, priming: "collab" });
+    const intent = "/collab Survey the fleet.\n\nThen 'quotes', a\ttab, and $dollars.";
+    await executeDirective(call, path, { ...DIRECTIVE, intent });
 
     const start = calls.find((args) => args[0] === "agent" && args[1] === "start");
     for (const arg of start ?? []) {
       expect([...arg].some((ch) => ch < " ")).toBe(false);
     }
     const intentPath = start?.[start.indexOf("--x-prompt-file") + 1] ?? "";
-    expect(readFileSync(intentPath, "utf8")).toBe(`/collab ${prompt}`);
+    expect(readFileSync(intentPath, "utf8")).toBe(intent);
   });
 
-  test("an empty primed intent writes no spool file", async () => {
+  test("a null intent writes no spool file", async () => {
     const { call, calls } = fake([
       { result: { panes: [] } },
       { result: { workspaces: [] } },
@@ -250,14 +212,14 @@ describe("executeLaunch", () => {
       { result: {} },
     ]);
     const path = logPath();
-    await executeLaunch(call, path, { ...PLAN, prompt: "" });
+    await executeDirective(call, path, { ...DIRECTIVE, intent: null });
 
     const start = calls.find((args) => args[0] === "agent" && args[1] === "start");
     expect(start).not.toContain("--x-prompt-file");
     expect(existsSync(join(dirname(path), "intents"))).toBe(false);
   });
 
-  test("a worktree launch is branchless; herdr's chosen name lands in the record", async () => {
+  test("a worktree directive is branchless; herdr's chosen name lands in the record", async () => {
     const { call, calls } = fake([
       {
         result: {
@@ -269,11 +231,33 @@ describe("executeLaunch", () => {
       { result: {} },
     ]);
     const path = logPath();
-    await executeLaunch(call, path, { ...PLAN, worktree: true });
+    await executeDirective(call, path, { ...DIRECTIVE, worktree: true });
 
     expect(calls[0]).toEqual(["worktree", "create", "--cwd", "/code/alpha", "--no-focus"]);
     const record = JSON.parse(readFileSync(path, "utf8").trim());
     expect(record.branch).toBe("worktree/calm-cloud-0009");
+  });
+
+  test("the record carries the directive's extras beside the host's fields", async () => {
+    const { call } = fake([
+      { result: { panes: [] } },
+      { result: { workspaces: [] } },
+      CREATED,
+      { result: { agents: [] } },
+      { result: {} },
+    ]);
+    const path = logPath();
+    await executeDirective(call, path, {
+      ...DIRECTIVE,
+      record: { model: "fable", effort: "max", priming: "collab", agent: "spoofed" },
+    });
+    const record = JSON.parse(readFileSync(path, "utf8").trim());
+    expect(record.model).toBe("fable");
+    expect(record.priming).toBe("collab");
+    // The host's own fields win a name collision.
+    expect(record.agent).toMatch(/^a-[0-9a-f]{10}$/);
+    expect(record.project).toBe("/code/alpha");
+    expect(record.harness).toBe("claude");
   });
 
   test("an unconfirmed name records the launch instead of failing it", async () => {
@@ -285,7 +269,7 @@ describe("executeLaunch", () => {
       { error: { code: "timeout", message: "timed out waiting for agent startup" } },
     ]);
     const path = logPath();
-    await executeLaunch(call, path, PLAN);
+    await executeDirective(call, path, DIRECTIVE);
 
     const record = JSON.parse(readFileSync(path, "utf8").trim());
     expect(record.named).toBe(false);
@@ -303,7 +287,7 @@ describe("executeLaunch", () => {
     const path = logPath();
     let caught: unknown;
     try {
-      await executeLaunch(call, path, PLAN);
+      await executeDirective(call, path, DIRECTIVE);
     } catch (error) {
       caught = error;
     }

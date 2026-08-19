@@ -3,7 +3,7 @@
 # the source-linked fleet installs on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.6.0"
+version = "0.7.0"
 min_herdr_version = "0.8.0"
 description = "Launch agents, show subscription usage, control the voice console, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
@@ -13,15 +13,18 @@ platforms = ["macos", "linux"]
 # fronts agentusage, the voice console fronts agentvoice. A new pane entrypoint
 # takes its CLI's name the same way.
 #
-# The launch surface is a session-modal popup over the active pane. Its caller
-# passes the active pane's cwd so the form preselects the project it opened over.
+# The launch surface is a session-modal popup over the active pane. The host
+# resolves the active pane's cwd and runs agentlaunch's form there, so the form
+# preselects the project it opened over; directives the form emits become herdr
+# sessions through the host's sink (the surface-handoff-protocol wiki page is
+# the contract).
 [[panes]]
 id = "launch"
 title = "Agent Launch"
 placement = "popup"
 width = "80%"
 height = "80%"
-command = ["agentsurface", "launch"]
+command = ["agentsurface", "host", "--", "agentlaunch", "--x-surface"]
 
 # Popup-bound fleet TUIs live together in this plugin. The wrapper preserves
 # the usage dialog's established escape-to-close behavior.

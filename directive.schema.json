@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "agentsurface session directive",
+  "description": "One session directive: a single JSON line a surface-hosted tool appends to the file named by AGENTSURFACE_DIRECTIVES, describing a session for agentsurface to realize on the herdr surface. The surface-handoff-protocol wiki page is the contract; agentsurface validates every line strictly and refuses unknown keys and unknown schema_versions.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "description": "The directive format version this line speaks. Currently 1."
+    },
+    "cwd": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute project directory the session works in: the workspace cwd, or the worktree's source repository."
+    },
+    "worktree": {
+      "type": "boolean",
+      "description": "True to create a herdr worktree from cwd (herdr names the branch); false for a workspace or tab at cwd."
+    },
+    "focus": {
+      "type": "boolean",
+      "description": "Whether the created surface takes focus or opens in the background."
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The herdr agent kind to start — a fleet harness name (claude, codex, pi). Herdr runs the kind's bare command, which is the fleet shim into agentlaunch."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "One launch argument, typed into the pane by herdr — so no control characters."
+          },
+          "description": "Arguments for the agent start, before any intent delivery the host appends. For agentlaunch-shimmed kinds these are --x-* extension flags and native tokens."
+        }
+      },
+      "required": ["kind", "args"],
+      "additionalProperties": false,
+      "description": "The agent to start in the created surface's root pane."
+    },
+    "intent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The composed prompt text the session starts with, or null for none. The host spools it to a file and delivers it via agentlaunch's --x-prompt-file, because herdr types the launch and refuses control characters in arguments."
+    },
+    "record": {
+      "description": "Opaque extras the host merges into its launch record — bookkeeping the emitting tool wants remembered beside the host's own fields.",
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": ["schema_version", "cwd", "worktree", "focus", "agent", "intent"],
+  "additionalProperties": false
+}

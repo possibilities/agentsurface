@@ -1,38 +1,37 @@
 # Glossary
 
 **Integration** — One AgentSurface subcommand tying fleet tools to the herdr
-session. `launch` is the first. _Avoid_: feature, mode.
+session. `host` is the first. _Avoid_: feature, mode.
 
-**Launch** — The whole flow one `launch` commit performs: create the herdr
-workspace or worktree, start the balanced agent in its root pane, submit the
-intent. _Avoid_: run, spawn.
+**Host** — The `host` integration: run one fleet TUI on the popup's
+terminal and realize every session directive it emits, at once and
+detached. The tool is a black box with a terminal; directives are the only
+thing read back. _Avoid_: wrapper, launcher.
 
-**Intent** — The prompt the operator types first; it rides the launch as a
-native positional token, so the harness queues it behind any startup dialog
-(folder trust) and submits it once the dialog clears. _Avoid_: task, message.
+**Session directive** — One schema-versioned JSON line a hosted tool
+appends to the sink, describing a session for the surface to realize: cwd,
+worktree, focus, the agent kind with its arguments, the composed intent,
+and opaque record extras. Strictly validated, hard version gate, published
+as `directive.schema.json`; the `surface-handoff-protocol` wiki page is
+the contract. _Avoid_: plan, launch request.
 
-**Project** — A directory one level under a configured root. Not necessarily
-a git repository; only the worktree option needs one. _Avoid_: repo.
+**Sink** — The fresh per-run append-only file the host creates and names to
+its tool in `AGENTSURFACE_DIRECTIVES`; the host tails it for complete
+lines while the tool runs, and keeps it afterwards as evidence, pruned by
+age. _Avoid_: pipe, socket.
 
-**Root** — A configured parent directory scanned one level deep for
-projects. Default `~/code` and `~/src`.
+**Launch** — Realizing one session directive: create the herdr workspace
+or worktree, start the agent in its root pane, deliver the intent.
+_Avoid_: run, spawn.
 
-**Frequency** — How often a project was launched, counted from AgentSurface's
-own launch log; orders the project list, most-used first. The log is
-bookkeeping, never authority.
+**Intent** — The directive's composed prompt text; it rides the launch as a
+native positional token (via the spool file and `--x-prompt-file`), so the
+harness queues it behind any startup dialog (folder trust) and submits it
+once the dialog clears. _Avoid_: task, message.
 
-**Level** — AgentLaunch's `<model>:<effort>` pair, passed through as the one
-`--x-level` value. The catalog validates the pair; AgentSurface only offers
-combinations the catalog already allows.
-
-**Cascade** — The harness → model → effort dependency in the form: changing
-a harness snaps to its default model and effort; changing a model keeps the
-effort when allowed, else snaps to the model's, else the harness's, default.
-
-**Priming** — A configured skill prefixed onto an intent in the harness's own
-spelling. The first configured priming is the fresh form's default; `none`
-remains available to launch the intent without a skill prefix. _Avoid_: system
-prompt, preprompt.
+**Project** — The directive's cwd: the directory the session works in. Not
+necessarily a git repository; only the worktree option needs one.
+_Avoid_: repo.
 
 **Surface** — Herdr, the terminal workspace manager the fleet launches onto.
 AgentSurface drives it only through the `herdr` CLI's socket API.

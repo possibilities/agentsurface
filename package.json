@@ -1,13 +1,13 @@
 {
   "name": "agentsurface",
   "version": "0.1.0",
-  "description": "Fleet integrations over the herdr surface: launch a balanced agent from a one-screen TUI",
+  "description": "Fleet integrations over the herdr surface: host fleet TUIs and realize their session directives",
   "private": false,
   "keywords": [
     "ai",
     "agent",
     "herdr",
-    "tui",
+    "host",
     "launcher"
   ],
   "homepage": "https://github.com/possibilities/agentsurface#readme",
@@ -24,7 +24,7 @@
   "files": [
     "src",
     "plugin",
-    "config.schema.json",
+    "directive.schema.json",
     "README.md",
     "LICENSE"
   ],
@@ -36,11 +36,10 @@
     "format": "biome check --write src test scripts",
     "typecheck": "tsc --noEmit",
     "test": "bun test --timeout 20000",
-    "generate:schemas": "bun run scripts/generate-schema.ts && biome check --write config.schema.json",
+    "generate:schemas": "bun run scripts/generate-schema.ts && biome check --write directive.schema.json",
     "check": "bun run lint && bun run typecheck && bun run test"
   },
   "dependencies": {
-    "@opentui/core": "^0.3.0",
     "zod": "^4"
   },
   "devDependencies": {

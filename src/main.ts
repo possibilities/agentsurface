@@ -5,21 +5,21 @@ import {
   EXIT_NO_PROMPT,
   EXIT_TRANSCRIPT_NOT_FOUND,
 } from "./conversation/slug.ts";
-import { CliError, UsageError } from "./errors.ts";
-import { TOP_HELP, VERSION } from "./help.ts";
-import { createHerdrCall, HerdrError } from "./herdr.ts";
-import { runLaunch } from "./launch/app.ts";
 import {
-  executeLaunch,
+  executeDirective,
   LaunchFailure,
   launchFailureBody,
   notifyLaunchFailure,
-  parseDetachedLaunch,
-} from "./launch/executor.ts";
+} from "./directive.ts";
+import { parseDirective } from "./directive-schema.ts";
+import { CliError, UsageError } from "./errors.ts";
+import { TOP_HELP, VERSION } from "./help.ts";
+import { createHerdrCall, HerdrError } from "./herdr.ts";
+import { runHost } from "./host.ts";
 import { launchLogPath } from "./state.ts";
 import { nameTabFromEnvironment } from "./tab-namer.ts";
 
-/** The launcher usually runs inside a herdr popup, which closes with the
+/** The host usually runs inside a herdr popup, which closes with the
  * process — hold a failure on screen until a key or a timeout, so the
  * message can actually be read. */
 async function holdForKeypress(): Promise<void> {
@@ -52,14 +52,13 @@ async function main(argv: string[]): Promise<number> {
     console.log(VERSION);
     return 0;
   }
-  if (first === "launch") {
-    if (argv.length > 1) {
-      console.error("launch takes no arguments");
-      console.error(TOP_HELP);
-      return 2;
-    }
+  if (first === "host") {
     try {
-      return await runLaunch(process.env, process.env["HOME"] ?? "");
+      const code = await runHost(process.env, process.env["HOME"] ?? "", argv.slice(1));
+      // A tool that failed printed to this terminal; hold the popup so the
+      // message can be read. An operator's ctrl+c (130) asked for the close.
+      if (code !== 0 && code !== 130) await holdForKeypress();
+      return code;
     } catch (error) {
       if (error instanceof UsageError) {
         console.error(error.message);
@@ -193,14 +192,21 @@ async function main(argv: string[]): Promise<number> {
     }
     return await nameTabFromEnvironment(process.env, process.env["HOME"] ?? "");
   }
-  if (first === "execute-launch") {
-    // Internal: the launcher spawns this detached so the popup closes the
-    // moment a launch is submitted. There is no terminal to hold — errors go
-    // to stderr and, best-effort, to a herdr notification.
+  if (first === "execute-directive") {
+    // Internal: the host spawns this detached so a hosted TUI's popup can
+    // close the moment a directive is submitted. There is no terminal to
+    // hold — errors go to stderr and, best-effort, to a herdr notification.
     try {
-      const plan = parseDetachedLaunch(argv[1] ?? "");
+      if (argv.length !== 2) {
+        throw new UsageError("execute-directive takes the directive as one JSON argument");
+      }
+      const directive = parseDirective(argv[1] ?? "");
       const env = process.env;
-      await executeLaunch(createHerdrCall(env), launchLogPath(env, env["HOME"] ?? ""), plan);
+      await executeDirective(
+        createHerdrCall(env),
+        launchLogPath(env, env["HOME"] ?? ""),
+        directive,
+      );
       return 0;
     } catch (error) {
       if (error instanceof UsageError) {

@@ -1,14 +1,6 @@
-import {
-  closeSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { UsageError } from "../errors.ts";
+import type { SessionDirective } from "./directive-schema.ts";
 import {
   createTab,
   createWorkspace,
@@ -22,95 +14,21 @@ import {
   liveAgentNames,
   nextAgentName,
   startAgentWhenReady,
-} from "../herdr.ts";
-import type { Environ } from "../paths.ts";
-import { appendLaunch } from "../state.ts";
-import type { LaunchPlan } from "./model.ts";
+} from "./herdr.ts";
+import type { Environ } from "./paths.ts";
+import { appendLaunch } from "./state.ts";
 
 /**
- * The detached half of a launch. Submitting must close the popup right
- * away, and a popup closes only when its process exits — so the TUI hands
- * the frozen plan to `agentsurface execute-launch <json>` spawned detached,
- * and exits. The executor creates the workspace or worktree (focused or
- * not, by submit mode), starts the agent with the intent riding the launch
- * as a spool-file reference, and appends the launch record. With no
- * terminal to report to, a failure goes to a herdr notification.
+ * Realizing one session directive: create the workspace or worktree
+ * (focused or not, by the directive), start the agent with the intent
+ * riding the launch as a spool-file reference, and append the launch
+ * record. Runs detached from the host — a hosted TUI's popup closes with
+ * its process, so execution cannot live there — and with no terminal to
+ * report to, a failure goes to a herdr notification.
  */
 
-export interface DetachedLaunch extends LaunchPlan {
-  focus: boolean;
-}
-
-export function parseDetachedLaunch(json: string): DetachedLaunch {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    throw new UsageError("execute-launch takes the launch plan as one JSON argument");
-  }
-  const plan = parsed as DetachedLaunch;
-  if (
-    typeof plan?.project?.path !== "string" ||
-    typeof plan.harness !== "string" ||
-    typeof plan.model !== "string" ||
-    typeof plan.effort !== "string" ||
-    typeof plan.level !== "string" ||
-    typeof plan.prompt !== "string" ||
-    typeof plan.worktree !== "boolean" ||
-    typeof plan.focus !== "boolean" ||
-    (plan.priming !== null && typeof plan.priming !== "string")
-  ) {
-    throw new UsageError("execute-launch plan is missing fields");
-  }
-  return plan;
-}
-
-/** The child's stderr appends to a log beside the launch records: a crash
- * before the executor's own failure handling must still leave evidence.
- *
- * `detached` is load-bearing, not hygiene: the launcher usually lives in a
- * herdr popup whose terminal closes the moment the TUI exits, and the pty
- * teardown SIGHUPs the foreground process group — which silently killed
- * same-group children before they could create anything. A separate group
- * survives the popup. */
-export function spawnDetachedLaunch(
-  env: Environ,
-  logPath: string,
-  plan: DetachedLaunch,
-): ReturnType<typeof Bun.spawn> {
-  let stderr: number | "ignore" = "ignore";
-  try {
-    mkdirSync(dirname(logPath), { recursive: true });
-    stderr = openSync(join(dirname(logPath), "executor.log"), "a");
-  } catch {
-    // No log home; the launch still matters more than its evidence.
-  }
-  const proc = Bun.spawn(
-    [process.execPath, process.argv[1] ?? "agentsurface", "execute-launch", JSON.stringify(plan)],
-    {
-      stdin: "ignore",
-      stdout: "ignore",
-      stderr,
-      detached: true,
-      env: env as Record<string, string>,
-    },
-  );
-  proc.unref();
-  if (typeof stderr === "number") closeSync(stderr);
-  return proc;
-}
-
-/** A priming rides the intent as each harness's own skill spelling: /name
- * for claude and pi, $name for codex — the prefix alone when the intent is
- * empty, so the skill still primes the session. */
-export function primedPrompt(plan: Pick<DetachedLaunch, "harness" | "prompt" | "priming">): string {
-  if (plan.priming === null) return plan.prompt;
-  const sigil = plan.harness === "codex" ? "$" : "/";
-  return `${sigil}${plan.priming}${plan.prompt === "" ? "" : ` ${plan.prompt}`}`;
-}
-
-/** A launch that never reached a running harness. It carries the spool file
- * holding the typed intent, because a failure notification the operator can
+/** A directive that never reached a running harness. It carries the spool
+ * file holding the intent, because a failure notification the operator can
  * act on has to name where the prompt went — recovering one otherwise means
  * reading the state directory by hand. */
 export class LaunchFailure extends Error {
@@ -122,60 +40,59 @@ export class LaunchFailure extends Error {
   }
 }
 
-/** Two launches can still race on an opaque alias before either agent
+/** Two directives can still race on an opaque alias before either agent
  * registers; `agent_name_taken` re-derives against the fresh list, excluding
  * names this launch already tried.
  *
  * A failure here is a failure to *start*: herdr's post-spawn confirmation
  * outcomes come back as an unnamed-but-started launch instead, recorded and
  * silent. */
-export async function executeLaunch(
+export async function executeDirective(
   call: HerdrCall,
   logPath: string,
-  plan: DetachedLaunch,
+  directive: SessionDirective,
 ): Promise<void> {
   const intent: { path: string | null } = { path: null };
   try {
-    await startLaunch(call, logPath, plan, intent);
+    await startSession(call, logPath, directive, intent);
   } catch (error) {
     throw new LaunchFailure(error instanceof Error ? error.message : String(error), intent.path);
   }
 }
 
-async function startLaunch(
+async function startSession(
   call: HerdrCall,
   logPath: string,
-  plan: DetachedLaunch,
+  directive: SessionDirective,
   intent: { path: string | null },
 ): Promise<void> {
   let surface: Awaited<ReturnType<typeof createWorkspace>>;
-  if (plan.worktree) {
-    surface = await createWorktree(call, { cwd: plan.project.path, focus: plan.focus });
+  if (directive.worktree) {
+    surface = await createWorktree(call, { cwd: directive.cwd, focus: directive.focus });
   } else {
     // A project already on the surface gets a new tab in its workspace; a
     // workspace is created only when none exists.
-    const existing = await findProjectWorkspace(call, plan.project.path);
+    const existing = await findProjectWorkspace(call, directive.cwd);
     if (existing !== null) {
       surface = await createTab(call, {
         workspaceId: existing,
-        cwd: plan.project.path,
-        focus: plan.focus,
+        cwd: directive.cwd,
+        focus: directive.focus,
       });
       // Focusing a tab focuses it within its workspace; the jump between
       // workspaces is its own move.
-      if (plan.focus) await focusWorkspace(call, existing);
+      if (directive.focus) await focusWorkspace(call, existing);
     } else {
       surface = await createWorkspace(call, {
-        cwd: plan.project.path,
-        label: basename(plan.project.path),
-        focus: plan.focus,
+        cwd: directive.cwd,
+        label: basename(directive.cwd),
+        focus: directive.focus,
       });
     }
   }
-  const primed = primedPrompt(plan);
-  const agentArgs = ["--x-level", plan.level];
-  if (primed !== "") {
-    intent.path = writeIntentFile(dirname(logPath), primed);
+  const agentArgs = [...directive.agent.args];
+  if (directive.intent !== null && directive.intent !== "") {
+    intent.path = writeIntentFile(dirname(logPath), directive.intent);
     agentArgs.push("--x-prompt-file", intent.path);
   }
   const tried = new Set<string>();
@@ -187,7 +104,7 @@ async function startLaunch(
     try {
       outcome = await startAgentWhenReady(call, {
         name,
-        kind: plan.harness,
+        kind: directive.agent.kind,
         paneId: surface.paneId,
         agentArgs,
       });
@@ -199,18 +116,18 @@ async function startLaunch(
       throw error;
     }
   }
+  // The directive's record extras ride along; the host's own fields win a
+  // name collision, so the record's provenance stays trustworthy.
   appendLaunch(logPath, {
+    ...directive.record,
     at: new Date().toISOString(),
-    project: plan.project.path,
-    harness: plan.harness,
-    model: plan.model,
-    effort: plan.effort,
-    worktree: plan.worktree,
+    project: directive.cwd,
+    harness: directive.agent.kind,
+    worktree: directive.worktree,
     branch: surface.branch,
     workspace: surface.workspaceId,
     agent: name,
     named: outcome.named,
-    priming: plan.priming,
   });
 }
 
@@ -223,20 +140,22 @@ async function startLaunch(
  * spool is pruned by age — one unlink at a time, like the log beside it. */
 export function writeIntentFile(
   stateDir: string,
-  primed: string,
+  intent: string,
   now: number = Date.now(),
 ): string {
   const spool = join(stateDir, "intents");
   mkdirSync(spool, { recursive: true });
-  pruneIntentSpool(spool, now);
+  pruneSpool(spool, now, INTENT_SPOOL_MAX_AGE_MS);
   const path = join(spool, `${now.toString(36)}-${crypto.randomUUID().slice(0, 8)}.txt`);
-  writeFileSync(path, primed);
+  writeFileSync(path, intent);
   return path;
 }
 
 const INTENT_SPOOL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-function pruneIntentSpool(spool: string, now: number): void {
+/** Old spool entries, removed one at a time; a raced unlink is a peer's
+ * prune finishing first, and costs nothing. */
+export function pruneSpool(spool: string, now: number, maxAgeMs: number): void {
   let entries: string[];
   try {
     entries = readdirSync(spool);
@@ -246,9 +165,9 @@ function pruneIntentSpool(spool: string, now: number): void {
   for (const entry of entries) {
     const path = join(spool, entry);
     try {
-      if (now - statSync(path).mtimeMs > INTENT_SPOOL_MAX_AGE_MS) unlinkSync(path);
+      if (now - statSync(path).mtimeMs > maxAgeMs) unlinkSync(path);
     } catch {
-      // A concurrent executor may have pruned it first; the launch goes on.
+      // A concurrent pruner may have won; the work goes on.
     }
   }
 }

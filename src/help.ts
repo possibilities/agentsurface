@@ -3,17 +3,20 @@ export const VERSION = "agentsurface 0.1.0";
 export const TOP_HELP = `agentsurface — fleet integrations over the herdr surface
 
 Usage:
-  agentsurface launch
+  agentsurface host [--] <command> [args…]
   agentsurface conversation slug <harness> <session-id-or-path>
   agentsurface agents [--all]
   agentsurface message <target> "<text>" [--wait-unblocked] [--timeout <ms>]
   agentsurface --help | --version
 
 Commands:
-  launch    One-screen launcher. Type the intent first, then confirm project,
-            worktree, and the harness/model/effort cascade from agentlaunch's
-            catalog; agentsurface creates a herdr workspace (or worktree),
-            starts the balanced agent there, and submits the intent.
+  host      Run a fleet TUI on this terminal and realize every session
+            directive it emits. The host names a fresh sink file to the tool
+            in AGENTSURFACE_DIRECTIVES; each JSON line the tool appends
+            becomes a herdr workspace (or worktree) with an agent started in
+            it, at once and detached — the launch form is
+            \`agentsurface host -- agentlaunch --x-surface\`. Directive
+            failures reach the operator as herdr notifications.
   conversation slug
             Print a short list-ready slug for a conversation, derived from
             its first user prompt by the conversation's own harness (claude,
@@ -29,12 +32,11 @@ Commands:
             (--wait-unblocked lingers and retries until --timeout, 120s
             default, then reports the message undelivered).
 
-Keys in the launcher:
-  ctrl+k opens the command palette; every action lives there.
-
 Files:
-  ~/.config/agentsurface/config.json        project roots (default ~/code, ~/src)
-  ~/.local/state/agentsurface/launches.jsonl  launch log; orders projects by use
+  directive.schema.json (checked in)            the session directive format
+  ~/.local/state/agentsurface/launches.jsonl    launch log of realized directives
+  ~/.local/state/agentsurface/directives/       per-run directive sinks
 
-Requires a running herdr session and agentlaunch on PATH.
+Requires a running herdr session. The surface-handoff-protocol wiki page is
+the directive contract.
 `;

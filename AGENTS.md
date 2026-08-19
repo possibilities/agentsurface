@@ -2,20 +2,24 @@
 
 AgentSurface is the fleet's integration point with herdr, the launch surface:
 each subcommand ties `~/code/agent*` tools to the running herdr session. The
-first integration is `launch` — a one-screen, prompt-first TUI that creates a
-herdr workspace (or worktree), starts a balanced agent there through the
-fleet's launch policy, and submits the typed intent. The second is
+first integration is `host` — run a fleet TUI on the popup's terminal and
+realize every session directive it emits as a herdr workspace (or worktree)
+with an agent started in it. The TUIs themselves live with the tools they
+front (agentlaunch's `--x-surface` launch form is the first); the
+`surface-handoff-protocol` wiki page is the directive contract, and
+`directive.schema.json` its published format. The second is
 `conversation slug` — a short list-ready name for any conversation, derived
 from its first user prompt by the conversation's own harness at the
 catalog's metadata level. The third is the message bus — `agents` and
 `message` — agents on the surface listing and messaging each other, with
 herdr delivering each message as typed input.
 
-The boundary is strict in both directions. Herdr owns every topology
+The boundary is strict in every direction. Herdr owns every topology
 semantic: where worktrees go, what a workspace is, when a pane is an
-available shell. AgentLaunch owns the catalog, balancing, yolo, and native
-argv composition. AgentSurface composes the two over their public commands
-and re-implements neither.
+available shell. The hosted tool owns its whole choice UX and everything in
+its directives; AgentSurface never inspects why a directive says what it
+says. AgentSurface realizes directives over herdr's public commands and
+re-implements neither side.
 
 ## Commands
 
@@ -27,32 +31,29 @@ and re-implements neither.
 ## Architecture
 
 - `main.ts` owns routing, exit semantics, and the popup-friendly failure
-  hold. Routes are `launch`, `conversation slug`, `agents`, `message`, the internal
-  `execute-launch` and `name-tab`, `--help`, `--version`. The conversation
+  hold. Routes are `host`, `conversation slug`, `agents`, `message`, the internal
+  `execute-directive` and `name-tab`, `--help`, `--version`. The conversation
   route holds nothing on screen and exits 3 (no such transcript) or 4 (no
   user prompt yet) so machine callers can poll.
-- `launch/model.ts` is the pure form: fields, focus, the harness → model →
-  effort cascade, validation, and line building. Everything decidable
-  without a terminal is decided here, where tests reach it. Defaults come
-  from the world: the project from the focused pane's cwd, the cascade from
-  the last launch where the catalog still allows it.
-- `launch/app.ts` is the thin OpenTUI shell over the model. The intent
-  field is OpenTUI's Textarea; `syncIntent` is the ONE place that ever
-  calls `focus()`/`blur()` on it, strictly following `state.focus` — a
-  second focus path means the renderer routes every key twice. The body
-  is one renderable per form row so rows are pointer targets: a press
-  runs the row's primary action (chooser, toggle, intent focus), the
-  wheel steps the value, and a press outside an open overlay dismisses
-  it. `launch/theme.ts` holds the Signal Room tokens;
-  `launch/overlay.ts` is the palette anatomy, generalized one notch into
-  the five choosers.
-- `launch/executor.ts` is the detached half: submitting must close the
-  popup at once, and a popup closes only with its process — so the TUI
-  spawns `agentsurface execute-launch <plan-json>` detached and exits (or,
-  submitted unfocused with `a`, resets for another intent). The executor
-  reuses a workspace already hosting the project (a tab), creates one
-  otherwise, starts the agent, retries a raced `agent_name_taken`, appends
-  the record, and reports failure through a herdr notification.
+- `host.ts` is the generic surface host: check herdr, resolve the context
+  cwd (the focused pane's, asked of herdr — the popup does not inherit it),
+  create a fresh per-run sink file, and run the tool with the terminal and
+  `AGENTSURFACE_DIRECTIVES` naming the sink. While the tool runs, the host
+  tails the sink and spawns a detached `agentsurface execute-directive`
+  per complete line — a background submit launches while the tool's form
+  stays open, and the popup still closes the moment the tool exits, with a
+  final drain catching the submit that landed just before. A refused line
+  is notified and reported at exit; it never stops the stream. A tool that
+  exits nonzero holds the popup so its message can be read (130, the
+  operator's ctrl+c, excepted).
+- `directive-schema.ts` is the protocol: the session directive as a strict
+  zod schema, published as `directive.schema.json`, refusing unknown keys
+  and unknown schema_versions. `directive.ts` is the detached half that
+  realizes one: it reuses a workspace already hosting the project (a tab),
+  creates one (or a worktree) otherwise, starts the agent, retries a raced
+  `agent_name_taken`, appends the record (the directive's `record` extras
+  riding beside the host's fields, which win collisions), and reports
+  failure through a herdr notification.
 - `herdr.ts` speaks the herdr CLI's socket API: workspace/worktree/tab
   create, the surface listings, and agent start (with the pane-busy ready
   retry). The intent rides the launch as an `--x-prompt-file` spool
@@ -60,7 +61,8 @@ and re-implements neither.
   control characters, so the text itself cannot travel as an argument;
   agentlaunch appends the file's text as the final native token, which is
   why a startup dialog still cannot drop it. The executor prunes the spool
-  by age. JSON answers only; success on stdout, errors on stderr.
+  by age, and the host prunes old sinks the same way. JSON answers only;
+  success on stdout, errors on stderr.
 - `bus.ts` is the message bus. An agent's name on the bus is the label of
   the tab hosting its pane — the tab namer's slug, or a hand rename —
   mutable and collidable, so the session id is the stable address.
@@ -76,9 +78,9 @@ and re-implements neither.
   attempt as the probe, retried until `--timeout`). There is deliberately
   no deliver-later queue. `skills/bus/SKILL.md` is the runbook agents
   load; agentstart's skills scan installs it.
-- `catalog.ts` consumes `agentlaunch x-catalog --x-json` — the resolved,
-  validated pair space, plus each harness's designated metadata level. The
-  TUI can never offer an invalid model:effort.
+- `catalog.ts` consumes `agentlaunch x-catalog --x-json` for the slug
+  pipeline's metadata level; the launch choice space is no longer this
+  repository's concern.
 - `conversation/` is the slug pipeline: `resolve.ts` finds the transcript
   by id-in-filename glob over the harness's native store (no index in
   between, so nothing can be stale); `extract.ts` reads the first
@@ -93,15 +95,14 @@ and re-implements neither.
   quarantined workspace. Inference names `agentlaunch` directly — the bare
   shims would exec the native binary under a session's AGENTLAUNCH_LAUNCH
   sentinel and drop the level.
-- `projects.ts` + `state.ts`: roots scanned one level deep, ordered by the
-  launch log's frequency counts; the log is bookkeeping, never authority.
-- `config*.ts` strictly load `~/.config/agentsurface/config.json`; absence
-  means the default roots (`~/code`, `~/src`).
+- `state.ts`: the launch log of realized directives — bookkeeping, never
+  authority. Project roots, priming, and the form's own state moved to
+  agentlaunch with the form; agentsurface has no config file.
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
   installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
-  entrypoint runs `agentsurface launch` in a session-modal popup;
-  AgentStart's keybinding passes the active pane's cwd when it opens the
-  entrypoint. Its `usage` pane entrypoint runs `agentusage` through the
+  entrypoint runs `agentsurface host -- agentlaunch --x-surface` in a
+  session-modal popup; the host resolves the active pane's cwd and runs the
+  form there. Its `usage` pane entrypoint runs `agentusage` through the
   escape-to-close wrapper; its `voice` pane entrypoint runs `agentvoice
   remote`, bare — that TUI spends esc on its own palette and quits on `q`,
   so the wrapper would close the popup instead of the palette. Popup titles
@@ -125,12 +126,9 @@ and re-implements neither.
 
 ## Invariants
 
-- The TUI is chromeless Signal Room: no header, footer, identity row, or
-  help line; status lives in-body; every action is in the ctrl+k palette;
-  ctrl+c is never consumed. The `fleet-tui-design` wiki page is the contract.
-- Model and effort travel as one `--x-level <model>:<effort>` value. The
-  pair is validated by agentlaunch's catalog, never split or re-validated
-  here.
+- A directive is executed exactly as written or refused exactly as
+  received: strict parse, hard version gate, no defaults, no repair. The
+  host never reorders, batches, or coalesces the stream.
 - The launched process is herdr's, started by `herdr agent start` running
   the bare harness command — which is the fleet shim into agentlaunch. No
   harness binary is ever resolved or spawned by this repository; slug
@@ -139,6 +137,10 @@ and re-implements neither.
   herdr's own typed-input path; this repository never writes to a pane.
   Delivery is not receipt: the confirmation carries the target's status so
   the sender knows a working harness queued the message.
+- A hosted tool is a black box with a terminal: the host lends it the tty,
+  the cwd, and the sink, and reads nothing back but directives and the
+  exit code. Feedback about a directive's fate is the operator's (herdr
+  notifications), never the tool's.
 - A launch fails only when no harness ran. `herdr agent start` spawns and
   then waits to confirm the launch alias; every outcome of that wait —
   `agent_not_ready`, `timeout`, `agent_name_not_found` — is an unnamed but

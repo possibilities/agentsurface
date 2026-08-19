@@ -2,71 +2,45 @@
 
 AgentSurface ties the `~/code/agent*` fleet to [herdr](https://github.com/wilkystyle/herdr),
 the terminal workspace manager fleet agents run inside. Each subcommand is
-one integration; the first is `launch`, the second `conversation slug`.
+one integration; the first is `host`, the second `conversation slug`.
 
-## Launch
+## Host
 
 ```sh
-agentsurface launch
+agentsurface host -- agentlaunch --x-surface
 ```
 
-One screen, prompt-first: type what you want done (or don't — the intent is
-optional), then confirm the rest.
+`host` runs one fleet TUI on the current terminal (usually a herdr popup)
+and realizes every **session directive** it emits. The host creates a fresh
+sink file, names it to the tool in `AGENTSURFACE_DIRECTIVES`, resolves the
+focused pane's cwd, and runs the tool there; each JSON line the tool
+appends to the sink becomes — at once, detached from the tool — a herdr
+workspace (or worktree, or a tab in the workspace already hosting the
+project) with an agent started in its root pane and the directive's intent
+delivered as the first prompt (`herdr agent start` runs the bare harness
+command, the fleet shim into agentlaunch, so balancing, yolo policy, and
+model injection all apply).
 
-- **Intent** — the prompt at the top; it rides the launch as the agent's
-  first prompt. The field is a real line editor (OpenTUI's textarea):
-  readline motions and kills (ctrl+a/e/b/f, alt+b/f, ctrl+w/u, alt+d, and
-  ctrl+k kill-to-line-end while focused) feeding a real kill ring —
-  consecutive kills merge, ctrl+y yanks, alt+y cycles the ring —
-  selection, native undo/redo (ctrl+- or ctrl+_ or ctrl+/ undo, ctrl+.
-  redo), and paste all behave; a restored draft opens with the cursor at
-  the end;
-  shift+enter or ctrl+j insert a newline; ctrl+g opens the intent in
-  `$EDITOR` (`$VISUAL` first) the way the harnesses do. Enter moves on to
-  the configuration rows; the ctrl+k command palette answers from every
-  other row. Escape always keeps your work: the whole form persists on
-  every keystroke and an interrupted launcher reopens exactly where it
-  stopped, while a submitted one starts fresh.
-- **Project** — the configured roots themselves plus the directories one
-  level under them, ordered by
-  how often you have launched into them (alphabetical until then), and
-  preselected from the pane the launcher opened over — that default leads
-  the list, so the first step down is your most-launched other project.
-  Space or `p` opens the filterable picker.
-- **Worktree** — off by default; `w` toggles. On, herdr creates a new git
-  worktree for the project (branch name suggested from the intent, editable)
-  and opens it as its own workspace.
-- **Priming** — an optional skill prefixed onto the intent, chosen from the
-  config's `priming` list (`i` or space opens the picker; "none" is the
-  first picker option, while the first configured skill is the default).
-  An interrupted form restores its selection. Priming travels in each
-  harness's own spelling: `/collab …` for claude and pi, `$collab …` for
-  codex — the prefix alone when the intent is empty.
-- **Harness → model → effort** — the cascade from agentlaunch's catalog,
-  fetched at runtime via `agentlaunch x-catalog`; only validated
-  combinations are offered, e.g. `claude → fable → xhigh`. Each row is a
-  filterable picker too (`h`, `m`, `e`, or space on the row), and the form
-  defaults to the previous launch's choices where the catalog still allows
-  them.
+A directive says everything the surface needs: cwd, worktree, focus, the
+agent kind with its launch arguments, the composed intent, and opaque
+record extras for the launch log. The format is
+[directive.schema.json](directive.schema.json), strictly validated with a
+hard `schema_version` gate; the `surface-handoff-protocol` wiki page is the
+contract. The tool never calls herdr or agentsurface and never learns a
+directive's fate — execution failures reach the operator as herdr
+notifications, and a refused directive is reported without stopping the
+stream.
 
-Enter submits and the popup closes at once; the launch continues detached.
-A project already on the surface gets a new tab in its workspace — a
-workspace is created only when none exists — the agent starts in the fresh
-pane (`herdr agent start` runs the bare harness command, the fleet shim
-into agentlaunch, so balancing, yolo policy, and model injection all
-apply), the intent submits, and the launch is recorded. You land on it as
-it appears; a background failure arrives as a herdr notification.
-
-`a` submits without taking focus and clears the form for the next intent —
-fire several launches from one popup. Every action lives in the ctrl+k
-command palette. Esc quits without launching; ctrl+c is always the
-terminal interrupt.
+The first hosted tool is agentlaunch's `--x-surface` launch form — the
+one-screen, prompt-first launcher that used to live in this repository.
+Its intent editor, project/harness/model/effort choosers, worktree toggle,
+priming, drafts, and project-frequency ordering are all agentlaunch's now;
+see agentlaunch's README.
 
 The bundled herdr plugin declares the launcher as a popup pane titled
 `Agent Launch` — popup titles are by convention the title-cased name of the
-CLI the TUI fronts. AgentStart links the plugin and opens that entrypoint from
-the keybinding, passing the active pane's cwd so the form starts on the project
-it opened over:
+CLI the TUI fronts. AgentStart links the plugin and opens that entrypoint
+from the keybinding:
 
 ```toml
 [[keys.command]]
@@ -151,21 +125,15 @@ the live working tree, like the rest of the fleet's tools. It accepts
 `--uninstall` and refuses foreign or unsafe paths instead of replacing
 them.
 
-## Configuration
+## State
 
-`~/.config/agentsurface/config.json`, optional and strictly validated
-([schema](config.schema.json)):
-
-```json
-{
-  "roots": ["~/code", "~/src"],
-  "priming": ["collab", "build", "orchestrate"]
-}
-```
-
-Without the file, those two roots are the default. The launch log at
-`~/.local/state/agentsurface/launches.jsonl` records each launch and feeds
-the frequency ordering; deleting it only flattens the order.
+AgentSurface has no config file — project roots and priming moved to
+agentlaunch's config with the launch form. The launch log at
+`~/.local/state/agentsurface/launches.jsonl` records each realized
+directive (with the emitting tool's record extras riding along), and
+`~/.local/state/agentsurface/directives/` keeps each host run's sink as
+evidence, pruned by age. Both are bookkeeping; deleting them loses only
+history.
 
 ## Development
 
