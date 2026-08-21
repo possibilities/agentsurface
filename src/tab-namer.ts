@@ -457,6 +457,24 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
       console.error(`name-tab: conversation token failed: ${(error as Error).message}`);
     }
   }
+  // A detection is the run worth keeping: it is the only one that publishes
+  // the sidebar's tokens, and it is rare enough that herdr's shared ring
+  // evicts it long before a blank sidebar row gets reported. The record
+  // lands as soon as both publishes settle rather than at the end of the
+  // run: the namer then polls for up to three minutes, and a run killed
+  // mid-poll — a restart, a reboot — must still leave the token evidence
+  // that explains the row.
+  const recorded =
+    detected === null
+      ? Promise.resolve()
+      : token.then(() => {
+          appendHookRecord(stateDir, {
+            at: new Date().toISOString(),
+            event: "pane.agent_detected",
+            paneId: detected.paneId,
+            outcomes,
+          });
+        });
   const code = await runTabNamer({
     call,
     stateDir,
@@ -464,17 +482,6 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
     slug: createSlugAttempt(env, home),
   });
   await token;
-  // A detection is the run worth keeping: it is the only one that publishes
-  // the sidebar's tokens, and it is rare enough that herdr's shared ring
-  // evicts it long before a blank sidebar row gets reported.
-  if (detected !== null) {
-    outcomes["namer"] = String(code);
-    appendHookRecord(stateDir, {
-      at: new Date().toISOString(),
-      event: "pane.agent_detected",
-      paneId: detected.paneId,
-      outcomes,
-    });
-  }
+  await recorded;
   return code;
 }
