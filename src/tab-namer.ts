@@ -421,6 +421,26 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
   }
 }
 
+/** What herdr reports holding for the pane once the publishes settle. Read
+ * back rather than assumed: a publish that returned cleanly and a token the
+ * sidebar can actually draw are different claims, and only the second one
+ * explains a blank row. Never throws — evidence is not worth a failed run. */
+async function heldTokens(
+  call: HerdrCall,
+  paneId: string,
+): Promise<Record<string, string> | string | null> {
+  try {
+    const result = (await invoke(call, ["pane", "get", paneId])) as {
+      pane?: { tokens?: unknown };
+    } | null;
+    const tokens = result?.pane?.tokens;
+    if (tokens === undefined || tokens === null) return null;
+    return tokens as Record<string, string>;
+  } catch (error) {
+    return (error as Error).message;
+  }
+}
+
 export async function nameTabFromEnvironment(env: Environ, home: string): Promise<number> {
   const stateDir = env["HERDR_PLUGIN_STATE_DIR"];
   const eventJson = env["HERDR_PLUGIN_EVENT_JSON"];
@@ -439,7 +459,19 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
   const outcomes: Record<string, string> = {};
   const detected =
     event !== null && event.kind === "agent_detected" && !event.released ? event : null;
+  // Only a detection is logged, and it is logged before any work: status
+  // transitions fire on every turn boundary and would evict the run worth
+  // reading, while a detection with no start record at all did not run —
+  // which is a different bug from one whose publishes failed.
   if (detected !== null) {
+    appendHookRecord(stateDir, {
+      at: new Date().toISOString(),
+      pid: process.pid,
+      phase: "start",
+      event: "pane.agent_detected",
+      paneId: detected.paneId,
+      eventJson,
+    });
     token = reportSidebarProjectToken(call, detected.paneId).then(
       () => {
         outcomes["project"] = "ok";
@@ -457,22 +489,24 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
       console.error(`name-tab: conversation token failed: ${(error as Error).message}`);
     }
   }
-  // A detection is the run worth keeping: it is the only one that publishes
-  // the sidebar's tokens, and it is rare enough that herdr's shared ring
-  // evicts it long before a blank sidebar row gets reported. The record
-  // lands as soon as both publishes settle rather than at the end of the
-  // run: the namer then polls for up to three minutes, and a run killed
-  // mid-poll — a restart, a reboot — must still leave the token evidence
-  // that explains the row.
+  // The outcome record lands as soon as both publishes settle rather than at
+  // the end of the run: the namer then polls for minutes, and a run killed
+  // mid-poll — a restart, a reboot — must still leave the evidence that
+  // explains the row. `held` is what herdr reports holding right after, so a
+  // row that goes blank later is provably herdr dropping a write rather than
+  // this hook never landing one.
   const recorded =
     detected === null
       ? Promise.resolve()
-      : token.then(() => {
+      : token.then(async () => {
           appendHookRecord(stateDir, {
             at: new Date().toISOString(),
+            pid: process.pid,
+            phase: "tokens",
             event: "pane.agent_detected",
             paneId: detected.paneId,
             outcomes,
+            held: await heldTokens(call, detected.paneId),
           });
         });
   const code = await runTabNamer({

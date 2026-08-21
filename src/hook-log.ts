@@ -14,15 +14,29 @@ import { join } from "node:path";
  */
 
 const HOOK_LOG_NAME = "hook-log.jsonl";
+/** Long enough that a detection survives the status transitions around it,
+ * short enough that the file stays readable by hand. */
 const HOOK_LOG_MAX_RECORDS = 500;
 
 export interface HookRecord {
   /** ISO timestamp; the surface's own clock, not herdr's. */
   at: string;
+  /** The run's pid, so its two records pair up and either can be lined up
+   * against herdr's own plugin log entry for the same run. */
+  pid: number;
+  /** `start` is written before any work: its absence means the hook never
+   * ran at all, which is a different bug from a publish that failed. */
+  phase: "start" | "tokens";
   event: string;
   paneId: string | null;
+  /** The event as herdr sent it, kept on the start record: `released` and
+   * the agent it names are not recoverable afterwards. */
+  eventJson?: string;
   /** One entry per side effect the run attempted: "ok" or the error text. */
-  outcomes: Record<string, string>;
+  outcomes?: Record<string, string>;
+  /** What herdr reports holding once the publishes settle — the difference
+   * between a write we believe landed and one herdr confirmed. */
+  held?: Record<string, string> | string | null;
 }
 
 export function hookLogPath(stateDir: string): string {

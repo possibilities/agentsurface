@@ -20,9 +20,12 @@ function stateDir(): string {
 function record(paneId: string): Parameters<typeof appendHookRecord>[1] {
   return {
     at: "2026-08-20T02:17:40.371Z",
+    pid: 1910,
+    phase: "tokens",
     event: "pane.agent_detected",
     paneId,
-    outcomes: { project: "ok", conversation: "ok", namer: "0" },
+    outcomes: { project: "ok", conversation: "ok" },
+    held: { project: "agentvoice", conversation: "voice-chat-extraction-and-assembly" },
   };
 }
 
