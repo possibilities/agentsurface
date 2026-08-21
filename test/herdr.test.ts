@@ -1,5 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  createHerdrCall,
   createTab,
   createWorkspace,
   createWorktree,
@@ -257,5 +261,55 @@ describe("startAgentWhenReady", () => {
       caught = error;
     }
     expect((caught as HerdrError).code).toBe("agent_pane_busy");
+  });
+});
+
+describe("createHerdrCall", () => {
+  const roots: string[] = [];
+
+  afterEach(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+    roots.length = 0;
+  });
+
+  /** A stand-in herdr that prints what the test asks for and exits with the
+   * given code — enough to exercise how a response is read. */
+  function stubBinary(stdout: string, stderr: string, exitCode: number): string {
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-herdr-call-"));
+    roots.push(root);
+    const path = join(root, "herdr");
+    writeFileSync(
+      path,
+      `#!/bin/sh\nprintf '%s' ${JSON.stringify(stdout)}\nprintf '%s' ${JSON.stringify(stderr)} >&2\nexit ${exitCode}\n`,
+    );
+    chmodSync(path, 0o755);
+    return path;
+  }
+
+  test("a silent success is a success, not a missing response", async () => {
+    // `pane report-metadata` and its siblings apply the change and answer
+    // nothing at all; treating that silence as a failure once made every
+    // sidebar token publish report an error for a write that had landed.
+    const call = createHerdrCall({ HERDR_BIN_PATH: stubBinary("", "", 0) });
+    expect(await call(["pane", "report-metadata", "w1:p1", "--token", "project=x"])).toEqual({});
+  });
+
+  test("silence with a nonzero exit still fails", async () => {
+    const call = createHerdrCall({ HERDR_BIN_PATH: stubBinary("", "", 1) });
+    let caught: unknown;
+    try {
+      await call(["pane", "get", "w1:p1"]);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(HerdrError);
+    expect((caught as HerdrError).message).toContain("no response");
+  });
+
+  test("a JSON body still wins over the exit code", async () => {
+    const call = createHerdrCall({
+      HERDR_BIN_PATH: stubBinary("", JSON.stringify({ error: { code: "no_such_pane" } }), 1),
+    });
+    expect(await call(["pane", "get", "gone"])).toEqual({ error: { code: "no_such_pane" } });
   });
 });

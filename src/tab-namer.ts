@@ -4,6 +4,7 @@ import { HARNESS_NAMES, type HarnessName } from "./conversation/resolve.ts";
 import { conversationSlug } from "./conversation/slug.ts";
 import { CliError } from "./errors.ts";
 import { createHerdrCall, type HerdrCall, HerdrError, invoke } from "./herdr.ts";
+import { appendHookRecord } from "./hook-log.ts";
 import type { Environ } from "./paths.ts";
 
 /**
@@ -37,8 +38,10 @@ import type { Environ } from "./paths.ts";
  * The claim is released when an attempt fails or expires — only by its
  * current owner — so the next event re-arms a fresh attempt; it stays with
  * the tab's name on success. Every failure is quiet by design — a tab
- * keeping its default label is not worth a notification, and herdr's
- * plugin log already records the run.
+ * keeping its default label is not worth a notification — but a detection
+ * run appends its outcomes to the plugin's own hook log, because herdr's
+ * shared ring evicts the rare detection long before anyone notices the
+ * sidebar row it left blank.
  */
 
 export interface PaneEvent {
@@ -433,13 +436,24 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
   // naming's critical path; the conversation token publishes before it, so
   // the namer's slug report is always the later write.
   let token: Promise<void> = Promise.resolve();
-  if (event !== null && event.kind === "agent_detected" && !event.released) {
-    token = reportSidebarProjectToken(call, event.paneId).catch((error: Error) => {
-      console.error(`name-tab: sidebar project token failed: ${error.message}`);
-    });
+  const outcomes: Record<string, string> = {};
+  const detected =
+    event !== null && event.kind === "agent_detected" && !event.released ? event : null;
+  if (detected !== null) {
+    token = reportSidebarProjectToken(call, detected.paneId).then(
+      () => {
+        outcomes["project"] = "ok";
+      },
+      (error: Error) => {
+        outcomes["project"] = error.message;
+        console.error(`name-tab: sidebar project token failed: ${error.message}`);
+      },
+    );
     try {
-      await reportConversationToken(call, event.paneId, stateDir);
+      await reportConversationToken(call, detected.paneId, stateDir);
+      outcomes["conversation"] = "ok";
     } catch (error) {
+      outcomes["conversation"] = (error as Error).message;
       console.error(`name-tab: conversation token failed: ${(error as Error).message}`);
     }
   }
@@ -450,5 +464,17 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
     slug: createSlugAttempt(env, home),
   });
   await token;
+  // A detection is the run worth keeping: it is the only one that publishes
+  // the sidebar's tokens, and it is rare enough that herdr's shared ring
+  // evicts it long before a blank sidebar row gets reported.
+  if (detected !== null) {
+    outcomes["namer"] = String(code);
+    appendHookRecord(stateDir, {
+      at: new Date().toISOString(),
+      event: "pane.agent_detected",
+      paneId: detected.paneId,
+      outcomes,
+    });
+  }
   return code;
 }

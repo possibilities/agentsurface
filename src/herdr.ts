@@ -49,7 +49,7 @@ export function createHerdrCall(env: Environ): HerdrCall {
       new Response(proc.stdout as ReadableStream).text(),
       new Response(proc.stderr as ReadableStream).text(),
     ]);
-    await proc.exited;
+    const exitCode = await proc.exited;
     for (const stream of [stdout, stderr]) {
       if (stream.trim() === "") continue;
       try {
@@ -59,6 +59,12 @@ export function createHerdrCall(env: Environ): HerdrCall {
         // Not JSON; try the other stream, then report the raw text below.
       }
     }
+    // Herdr's reporting commands answer nothing on success: the change
+    // landed and there is no body to send. Silence with a zero exit is that
+    // answer, not a failure — reading it as one made every sidebar token
+    // publish report an error for a write that had already succeeded, which
+    // left a real failure indistinguishable from an ordinary success.
+    if (exitCode === 0) return {};
     throw new HerdrError(
       `herdr ${args.join(" ")}: ${stderr.trim() || stdout.trim() || "no response"}`,
     );
