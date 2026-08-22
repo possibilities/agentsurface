@@ -103,11 +103,11 @@ export function renderConfirmation(
 ): string {
   const yes = selection === "confirm" ? `${REVERSE}[Yes]${RESET}` : "Yes";
   const no = selection === "cancel" ? `${REVERSE}[No]${RESET}` : "No";
-  const plainPrompt = `${confirmation.title} ${selection === "confirm" ? "[Yes] No" : "Yes [No]"}`;
-  const prompt = `${confirmation.title} ${yes} ${no}`;
-  const left = Math.max(0, Math.floor((columns - visibleLength(plainPrompt)) / 2));
-  const top = Math.max(0, Math.floor((rows - 1) / 2));
-  return `${CLEAR}${"\n".repeat(top)}${" ".repeat(left)}${prompt}`;
+  const plainChoices = selection === "confirm" ? "[Yes] No" : "Yes [No]";
+  const choices = `${yes} ${no}`;
+  const choicesLeft = Math.max(0, columns - visibleLength(plainChoices));
+  const top = Math.max(0, Math.floor((rows - 2) / 2));
+  return `${CLEAR}${"\n".repeat(top)} ${confirmation.title}\n${" ".repeat(choicesLeft)}${choices}`;
 }
 
 export async function askForConfirmation(

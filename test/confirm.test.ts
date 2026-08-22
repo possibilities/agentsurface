@@ -127,8 +127,10 @@ describe("confirmation interaction", () => {
     expect(terminal.rawModes).toEqual([true, false]);
   });
 
-  test("renders only the question and Yes / No choices", () => {
-    const rendered = renderConfirmation(parseConfirmation(args), "confirm", 20, 1);
-    expect(rendered).toBe("\u001b[2J\u001b[HClose pane? \u001b[7m[Yes]\u001b[0m No");
+  test("renders the question above right-aligned Yes / No choices", () => {
+    const rendered = renderConfirmation(parseConfirmation(args), "confirm", 22, 2);
+    expect(rendered).toBe(
+      "\u001b[2J\u001b[H Close pane?\n              \u001b[7m[Yes]\u001b[0m No",
+    );
   });
 });
