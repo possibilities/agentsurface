@@ -3,7 +3,7 @@
 # the source-linked fleet installs on PATH.
 id = "agentsurface"
 name = "AgentSurface"
-version = "0.11.0"
+version = "0.12.0"
 min_herdr_version = "0.8.0"
 description = "Launch agents, show usage, control voice, confirm topology closes, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
@@ -61,33 +61,33 @@ width = "80%"
 height = "80%"
 command = ["agentvoice", "remote"]
 
-# Destructive topology keybindings open these compact, named popups. All three
-# reuse AgentSurface's generic fail-closed confirmation; the internal
+# Destructive topology keybindings open these minimal confirmation popups. All
+# three reuse AgentSurface's generic exact-argv confirmation; the internal
 # close-active bridge reads the pane entrypoint's captured plugin context and
 # phrases only the public Herdr close command. Herdr keeps the topology rules.
 [[panes]]
 id = "confirm-close-pane"
-title = "Close Pane"
+title = "Confirm"
 placement = "popup"
-width = 60
-height = 11
-command = ["agentsurface", "confirm", "--title", "Close pane?", "--message", "The process running in this pane will stop.", "--confirm-label", "Close pane", "--", "agentsurface", "close-active", "pane"]
+width = 25
+height = 4
+command = ["agentsurface", "confirm", "--title", "Close pane?", "--", "agentsurface", "close-active", "pane"]
 
 [[panes]]
 id = "confirm-close-tab"
-title = "Close Tab"
+title = "Confirm"
 placement = "popup"
-width = 60
-height = 11
-command = ["agentsurface", "confirm", "--title", "Close tab?", "--message", "Every pane and process in this tab will stop.", "--confirm-label", "Close tab", "--", "agentsurface", "close-active", "tab"]
+width = 24
+height = 4
+command = ["agentsurface", "confirm", "--title", "Close tab?", "--", "agentsurface", "close-active", "tab"]
 
 [[panes]]
 id = "confirm-close-workspace"
-title = "Close Workspace"
+title = "Confirm"
 placement = "popup"
-width = 60
-height = 11
-command = ["agentsurface", "confirm", "--title", "Close workspace?", "--message", "Every tab, pane, and process in this workspace will stop.", "--confirm-label", "Close workspace", "--", "agentsurface", "close-active", "workspace"]
+width = 30
+height = 4
+command = ["agentsurface", "confirm", "--title", "Close workspace?", "--", "agentsurface", "close-active", "workspace"]
 
 # When herdr detects an agent in a pane, publish its sidebar project and
 # conversation tokens and name the pane's tab after the agent's conversation —

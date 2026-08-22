@@ -81,10 +81,10 @@ re-implements neither side.
   no deliver-later queue. `skills/bus/SKILL.md` is the runbook agents
   load; agentstart's skills scan installs it.
 - `confirm.ts` is the generic terminal safety boundary for keybindings: a
-  compact fail-closed dialog with Cancel focused by default, followed by an
-  exact argv spawn only after explicit approval. It owns no Herdr topology;
-  the plugin's internal `close-active` command reads the pane entrypoint's
-  captured context and phrases the public Herdr close command.
+  one-line `<question> [Yes] No` decision with Yes focused by default, followed
+  by an exact argv spawn only after interactive confirmation. It owns no Herdr
+  topology; the plugin's internal `close-active` command reads the pane
+  entrypoint's captured context and phrases the public Herdr close command.
 - `close.ts` is that narrow internal context bridge. It accepts only `pane`,
   `tab`, or `workspace`, requires the corresponding id in
   `HERDR_PLUGIN_CONTEXT_JSON`, and delegates the close to Herdr's CLI.

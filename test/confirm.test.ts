@@ -36,31 +36,17 @@ class FakeTerminal implements ConfirmationTerminal {
   }
 }
 
-const args = [
-  "--title",
-  "Close pane?",
-  "--message",
-  "The process in this pane will stop.",
-  "--confirm-label",
-  "Close",
-  "--",
-  "/path with spaces/herdr",
-  "pane",
-  "close",
-  "w1:p2",
-];
+const args = ["--title", "Close pane?", "--", "/path with spaces/herdr", "pane", "close", "w1:p2"];
 
 describe("parseConfirmation", () => {
   test("preserves the command as exact argv", () => {
     expect(parseConfirmation(args)).toEqual({
       title: "Close pane?",
-      message: "The process in this pane will stop.",
-      confirmLabel: "Close",
       command: ["/path with spaces/herdr", "pane", "close", "w1:p2"],
     });
   });
 
-  test("rejects missing safety copy, separator, command, and unknown options", () => {
+  test("rejects a missing question, separator, command, and unknown options", () => {
     for (const invalid of [
       ["--", "true"],
       ["--title", "Proceed?", "true"],
@@ -73,7 +59,7 @@ describe("parseConfirmation", () => {
 });
 
 describe("confirmation interaction", () => {
-  test("starts on cancel and Enter remains a successful no-op", async () => {
+  test("starts on Yes and Enter executes only the exact parsed argv", async () => {
     const terminal = new FakeTerminal(["\r"]);
     const commands: string[][] = [];
     const code = await runConfirmation(args, terminal, async (command) => {
@@ -81,29 +67,31 @@ describe("confirmation interaction", () => {
       return 0;
     });
     expect(code).toBe(0);
-    expect(commands).toEqual([]);
+    expect(commands).toEqual([["/path with spaces/herdr", "pane", "close", "w1:p2"]]);
     expect(terminal.rawModes).toEqual([true, false]);
   });
 
-  test("y approves and executes only the exact parsed argv", async () => {
-    const terminal = new FakeTerminal(["y"]);
+  test("n cancels without invoking the command", async () => {
+    const terminal = new FakeTerminal(["n"]);
     const commands: string[][] = [];
     const code = await runConfirmation(args, terminal, async (command) => {
       commands.push(command);
       return 0;
     });
     expect(code).toBe(0);
-    expect(commands).toEqual([["/path with spaces/herdr", "pane", "close", "w1:p2"]]);
+    expect(commands).toEqual([]);
   });
 
-  test("navigation can select approval while escape always cancels", () => {
-    expect(interpretConfirmationKey("\t", "cancel")).toEqual({
-      selection: "confirm",
+  test("navigation follows the displayed Yes / No order while escape always cancels", () => {
+    expect(interpretConfirmationKey("y", "cancel").decision).toBe("confirm");
+    expect(interpretConfirmationKey("n", "confirm").decision).toBe("cancel");
+    expect(interpretConfirmationKey("\t", "confirm")).toEqual({
+      selection: "cancel",
       decision: null,
     });
     expect(interpretConfirmationKey("\r", "confirm").decision).toBe("confirm");
-    expect(interpretConfirmationKey("\u001b[D", "confirm").selection).toBe("cancel");
-    expect(interpretConfirmationKey("\u001b[C", "cancel").selection).toBe("confirm");
+    expect(interpretConfirmationKey("\u001b[D", "cancel").selection).toBe("confirm");
+    expect(interpretConfirmationKey("\u001b[C", "confirm").selection).toBe("cancel");
     expect(interpretConfirmationKey("\u001b", "confirm")).toEqual({
       selection: "cancel",
       decision: "cancel",
@@ -139,12 +127,8 @@ describe("confirmation interaction", () => {
     expect(terminal.rawModes).toEqual([true, false]);
   });
 
-  test("renders the prompt, message, choices, and keyboard hint", () => {
-    const rendered = renderConfirmation(parseConfirmation(args), "cancel", 50, 10);
-    expect(rendered).toContain("Close pane?");
-    expect(rendered).toContain("The process in this pane will stop.");
-    expect(rendered).toContain("Cancel");
-    expect(rendered).toContain("Close");
-    expect(rendered).toContain("Enter selects · Esc cancels");
+  test("renders only the question and Yes / No choices", () => {
+    const rendered = renderConfirmation(parseConfirmation(args), "confirm", 20, 1);
+    expect(rendered).toBe("\u001b[2J\u001b[HClose pane? \u001b[7m[Yes]\u001b[0m No");
   });
 });

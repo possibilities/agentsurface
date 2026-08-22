@@ -7,22 +7,21 @@ fleet TUIs, name conversations, connect agents, and guard terminal commands.
 ## Confirmation
 
 ```sh
-agentsurface confirm --title "Close pane?" --confirm-label "Close" -- command arg
+agentsurface confirm --title "Close pane?" -- command arg
 ```
 
 `confirm` is the reusable safety boundary for terminal keybindings that would
-otherwise act immediately. It opens with Cancel selected, executes the exact
-argv after `--` only when explicitly approved, and refuses to run without an
-interactive terminal. `y` confirms; `n`, `Esc`, and `q` cancel; arrows, Tab,
-and `h`/`l` move between the two choices before Enter selects one. Cancellation
-is a successful no-op, so dismissing a Herdr popup does not report a command
-failure.
+otherwise act immediately. It reduces the decision to `<question> [Yes] No`,
+with Yes selected, executes the exact argv after `--` only after interactive
+confirmation, and refuses to run without a terminal. Enter or `y` confirms;
+`n`, `Esc`, and `q` cancel; arrows, Tab, and `h`/`l` move between the choices.
+Cancellation is a successful no-op, so dismissing a Herdr popup does not report
+a command failure.
 
-The bundled plugin exposes named `Close Pane`, `Close Tab`, and `Close
-Workspace` entrypoints built on this command. AgentStart binds Herdr's normal
-close keys to those plugin panes and passes the active pane as the entrypoint
-target; the popup's captured context is therefore the thing approved, even if
-another client changes focus concurrently.
+The bundled plugin exposes three compact `Confirm` entrypoints for closing a
+pane, tab, or workspace. AgentStart binds Herdr's normal close keys to those
+plugin panes; Herdr captures the active topology in the popup context, so that
+captured target is the thing approved even if another client changes focus.
 
 ## Host
 

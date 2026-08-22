@@ -1,33 +1,26 @@
 import { CliError, UsageError } from "./errors.ts";
 
-export const CONFIRM_USAGE =
-  "confirm --title <text> [--message <text>] [--confirm-label <text>] -- <command> [args…]";
+export const CONFIRM_USAGE = "confirm --title <text> -- <command> [args…]";
 
 export interface Confirmation {
   title: string;
-  message: string | null;
-  confirmLabel: string;
   command: [string, ...string[]];
 }
 
 export function parseConfirmation(argv: string[]): Confirmation {
   let title: string | undefined;
-  let message: string | null = null;
-  let confirmLabel = "Confirm";
   let index = 0;
 
   while (index < argv.length && argv[index] !== "--") {
     const option = argv[index];
     const value = argv[index + 1];
-    if (option !== "--title" && option !== "--message" && option !== "--confirm-label") {
+    if (option !== "--title") {
       throw new UsageError(`unknown confirm option "${option ?? ""}"`);
     }
     if (value === undefined || value === "" || value === "--") {
       throw new UsageError(`${option} takes a non-empty value`);
     }
-    if (option === "--title") title = value;
-    if (option === "--message") message = value;
-    if (option === "--confirm-label") confirmLabel = value;
+    title = value;
     index += 2;
   }
 
@@ -44,8 +37,6 @@ export function parseConfirmation(argv: string[]): Confirmation {
 
   return {
     title,
-    message,
-    confirmLabel,
     command: command as [string, ...string[]],
   };
 }
@@ -77,10 +68,10 @@ export function interpretConfirmationKey(
     return { selection: selection === "cancel" ? "confirm" : "cancel", decision: null };
   }
   if (key === "\u001b[D" || key === "h") {
-    return { selection: "cancel", decision: null };
+    return { selection: "confirm", decision: null };
   }
   if (key === "\u001b[C" || key === "l") {
-    return { selection: "confirm", decision: null };
+    return { selection: "cancel", decision: null };
   }
   return { selection, decision: null };
 }
@@ -98,66 +89,29 @@ const CLEAR = "\u001b[2J\u001b[H";
 const HIDE_CURSOR = "\u001b[?25l";
 const SHOW_CURSOR = "\u001b[?25h";
 const RESET = "\u001b[0m";
-const BOLD = "\u001b[1m";
 const REVERSE = "\u001b[7m";
 
 function visibleLength(value: string): number {
   return [...value].length;
 }
 
-function centered(value: string, width: number): string {
-  return `${" ".repeat(Math.max(0, Math.floor((width - visibleLength(value)) / 2)))}${value}`;
-}
-
-function wrap(value: string, width: number): string[] {
-  const words = value.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [];
-  const lines: string[] = [];
-  let line = "";
-  for (const word of words) {
-    if (line === "") {
-      line = word;
-    } else if (visibleLength(`${line} ${word}`) <= width) {
-      line += ` ${word}`;
-    } else {
-      lines.push(line);
-      line = word;
-    }
-  }
-  if (line !== "") lines.push(line);
-  return lines;
-}
-
 export function renderConfirmation(
-  confirmation: Pick<Confirmation, "title" | "message" | "confirmLabel">,
+  confirmation: Pick<Confirmation, "title">,
   selection: ConfirmationSelection,
   columns: number,
   rows: number,
 ): string {
-  const width = Math.max(20, columns);
-  const contentWidth = Math.max(12, width - 4);
-  const messageLines =
-    confirmation.message === null ? [] : wrap(confirmation.message, contentWidth);
-  const cancel = selection === "cancel" ? `${REVERSE} Cancel ${RESET}` : " Cancel ";
-  const approveText = ` ${confirmation.confirmLabel} `;
-  const approve = selection === "confirm" ? `${REVERSE}${approveText}${RESET}` : approveText;
-  const buttons = `[${cancel}]  [${approve}]`;
-  const plainButtons = `[ Cancel ]  [${approveText}]`;
-  const body = [
-    `${BOLD}${centered(confirmation.title, width)}${RESET}`,
-    "",
-    ...messageLines.map((line) => centered(line, width)),
-    ...(messageLines.length > 0 ? [""] : []),
-    `${" ".repeat(Math.max(0, Math.floor((width - visibleLength(plainButtons)) / 2)))}${buttons}`,
-    "",
-    centered("Enter selects · Esc cancels", width),
-  ];
-  const top = Math.max(0, Math.floor((rows - body.length) / 2));
-  return `${CLEAR}${"\n".repeat(top)}${body.join("\n")}`;
+  const yes = selection === "confirm" ? `${REVERSE}[Yes]${RESET}` : "Yes";
+  const no = selection === "cancel" ? `${REVERSE}[No]${RESET}` : "No";
+  const plainPrompt = `${confirmation.title} ${selection === "confirm" ? "[Yes] No" : "Yes [No]"}`;
+  const prompt = `${confirmation.title} ${yes} ${no}`;
+  const left = Math.max(0, Math.floor((columns - visibleLength(plainPrompt)) / 2));
+  const top = Math.max(0, Math.floor((rows - 1) / 2));
+  return `${CLEAR}${"\n".repeat(top)}${" ".repeat(left)}${prompt}`;
 }
 
 export async function askForConfirmation(
-  confirmation: Pick<Confirmation, "title" | "message" | "confirmLabel">,
+  confirmation: Pick<Confirmation, "title">,
   terminal: ConfirmationTerminal,
 ): Promise<boolean> {
   if (!terminal.isTTY) {
@@ -167,7 +121,7 @@ export async function askForConfirmation(
     );
   }
 
-  let selection: ConfirmationSelection = "cancel";
+  let selection: ConfirmationSelection = "confirm";
   terminal.setRawMode(true);
   try {
     terminal.write(HIDE_CURSOR);

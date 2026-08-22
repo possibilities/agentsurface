@@ -70,9 +70,9 @@ behind the running turn. Delivery is not receipt. Distinct from the
 intent, which rides a launch. _Avoid_: prompt.
 
 **Confirmation** — The fail-closed terminal decision before an exact command
-argv runs. Cancel is the default and a non-interactive invocation refuses the
-command; the caller owns the action and its wording. _Avoid_: prompt, approval
-gate.
+argv runs. It presents only the caller's question and `Yes / No`, with Yes
+selected; a non-interactive invocation still refuses the command. _Avoid_:
+prompt, approval gate.
 
 **Metadata level** — The catalog's designated cheap `model:effort` pair for
 metadata completions (slugs, and later summaries): declared per harness in
