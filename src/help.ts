@@ -4,6 +4,8 @@ export const TOP_HELP = `agentsurface — fleet integrations over the herdr surf
 
 Usage:
   agentsurface host [--] <command> [args…]
+  agentsurface confirm --title <text> [--message <text>]
+                       [--confirm-label <text>] -- <command> [args…]
   agentsurface conversation slug <harness> <session-id-or-path>
   agentsurface conversation describe < requests.jsonl
   agentsurface agents [--all]
@@ -18,6 +20,10 @@ Commands:
             started in it, at once and detached — the launch form is
             \`agentsurface host -- agentlaunch --x-surface\`. Directive
             failures reach the operator as herdr notifications.
+  confirm   Show a fail-closed terminal confirmation and run the exact command
+            argv only when approved. Cancel is selected by default; Enter
+            accepts the selection, y confirms, and n/Esc/q cancels. A missing
+            interactive terminal refuses the command.
   conversation slug
             Print a short list-ready slug for a conversation, derived from
             its first user prompt by the conversation's own harness (claude,

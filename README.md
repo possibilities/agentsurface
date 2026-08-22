@@ -1,8 +1,28 @@
 # AgentSurface
 
 AgentSurface ties the `~/code/agent*` fleet to [herdr](https://github.com/wilkystyle/herdr),
-the terminal workspace manager fleet agents run inside. Each subcommand is
-one integration; the first is `host`, the second `conversation slug`.
+the terminal workspace manager fleet agents run inside. Its integrations host
+fleet TUIs, name conversations, connect agents, and guard terminal commands.
+
+## Confirmation
+
+```sh
+agentsurface confirm --title "Close pane?" --confirm-label "Close" -- command arg
+```
+
+`confirm` is the reusable safety boundary for terminal keybindings that would
+otherwise act immediately. It opens with Cancel selected, executes the exact
+argv after `--` only when explicitly approved, and refuses to run without an
+interactive terminal. `y` confirms; `n`, `Esc`, and `q` cancel; arrows, Tab,
+and `h`/`l` move between the two choices before Enter selects one. Cancellation
+is a successful no-op, so dismissing a Herdr popup does not report a command
+failure.
+
+The bundled plugin exposes named `Close Pane`, `Close Tab`, and `Close
+Workspace` entrypoints built on this command. AgentStart binds Herdr's normal
+close keys to those plugin panes and passes the active pane as the entrypoint
+target; the popup's captured context is therefore the thing approved, even if
+another client changes focus concurrently.
 
 ## Host
 

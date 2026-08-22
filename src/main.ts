@@ -1,5 +1,12 @@
 #!/usr/bin/env bun
 import { runAgents, runMessage } from "./bus.ts";
+import { closeActive } from "./close.ts";
+import {
+  CONFIRM_USAGE,
+  processTerminal,
+  runConfirmation,
+  spawnConfirmedCommand,
+} from "./confirm.ts";
 import {
   conversationSlug,
   EXIT_NO_PROMPT,
@@ -75,6 +82,40 @@ async function main(argv: string[]): Promise<number> {
         console.error(`error: ${(error as Error).message ?? String(error)}`);
       }
       await holdForKeypress();
+      return 1;
+    }
+  }
+  if (first === "confirm") {
+    try {
+      return await runConfirmation(argv.slice(1), processTerminal(), spawnConfirmedCommand);
+    } catch (error) {
+      if (error instanceof UsageError) {
+        console.error(error.message);
+        console.error(`Usage: agentsurface ${CONFIRM_USAGE}`);
+        return 2;
+      }
+      if (error instanceof CliError) {
+        console.error(`error: ${error.message}`);
+        return 1;
+      }
+      console.error(`error: ${(error as Error).message ?? String(error)}`);
+      return 1;
+    }
+  }
+  if (first === "close-active") {
+    try {
+      await closeActive(createHerdrCall(process.env), process.env, argv.slice(1));
+      return 0;
+    } catch (error) {
+      if (error instanceof UsageError) {
+        console.error(error.message);
+        return 2;
+      }
+      if (error instanceof CliError || error instanceof HerdrError) {
+        console.error(`error: ${error.message}`);
+        return 1;
+      }
+      console.error(`error: ${(error as Error).message ?? String(error)}`);
       return 1;
     }
   }

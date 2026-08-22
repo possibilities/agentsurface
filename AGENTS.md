@@ -12,7 +12,9 @@ front (agentlaunch's `--x-surface` launch form is the first); the
 from its first user prompt by the conversation's own harness at the
 catalog's metadata level. The third is the message bus — `agents` and
 `message` — agents on the surface listing and messaging each other, with
-herdr delivering each message as typed input.
+herdr delivering each message as typed input. `confirm` is the terminal
+safety boundary for keybindings that must require an explicit decision before
+running their command.
 
 The boundary is strict in every direction. Herdr owns every topology
 semantic: where worktrees go, what a workspace is, when a pane is an
@@ -31,7 +33,7 @@ re-implements neither side.
 ## Architecture
 
 - `main.ts` owns routing, exit semantics, and the popup-friendly failure
-  hold. Routes are `host`, `conversation slug`, `agents`, `message`, the internal
+  hold. Routes are `host`, `confirm`, `conversation slug`, `agents`, `message`, the internal
   `execute-directive` and `name-tab`, `--help`, `--version`. The conversation
   route holds nothing on screen and exits 3 (no such transcript) or 4 (no
   user prompt yet) so machine callers can poll.
@@ -78,6 +80,14 @@ re-implements neither side.
   attempt as the probe, retried until `--timeout`). There is deliberately
   no deliver-later queue. `skills/bus/SKILL.md` is the runbook agents
   load; agentstart's skills scan installs it.
+- `confirm.ts` is the generic terminal safety boundary for keybindings: a
+  compact fail-closed dialog with Cancel focused by default, followed by an
+  exact argv spawn only after explicit approval. It owns no Herdr topology;
+  the plugin's internal `close-active` command reads the pane entrypoint's
+  captured context and phrases the public Herdr close command.
+- `close.ts` is that narrow internal context bridge. It accepts only `pane`,
+  `tab`, or `workspace`, requires the corresponding id in
+  `HERDR_PLUGIN_CONTEXT_JSON`, and delegates the close to Herdr's CLI.
 - `catalog.ts` consumes `agentlaunch x-catalog --x-json` for the slug
   pipeline's metadata level; the launch choice space is no longer this
   repository's concern.
@@ -107,7 +117,9 @@ re-implements neither side.
   remote`, bare — that TUI spends esc on its own palette and quits on `q`,
   so the wrapper would close the popup instead of the palette. Popup titles
   follow one convention — the title-cased name of the CLI the TUI fronts:
-  `Agent Launch`, `Agent Usage`, `Agent Voice`. Its
+  `Agent Launch`, `Agent Usage`, `Agent Voice`. Its three compact close
+  entrypoints give AgentSurface's shared confirmation TUI stable titles and
+  geometry while preserving the active topology ids in plugin context. Its
   `pane.agent_detected` and `pane.agent_status_changed` hooks both run
   `agentsurface name-tab`; `tab-namer.ts` publishes the `$project` sidebar
   token on detection only (the current workspace label, or the root
