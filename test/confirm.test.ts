@@ -130,7 +130,7 @@ describe("confirmation interaction", () => {
   test("renders the question above right-aligned Yes / No choices", () => {
     const rendered = renderConfirmation(parseConfirmation(args), "confirm", 22, 2);
     expect(rendered).toBe(
-      "\u001b[2J\u001b[H Close pane?\n              \u001b[7m[Yes]\u001b[0m No",
+      "\u001b[2J\u001b[H Close pane?\n                \u001b[7mYes\u001b[0m No",
     );
   });
 });

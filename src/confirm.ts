@@ -101,9 +101,9 @@ export function renderConfirmation(
   columns: number,
   rows: number,
 ): string {
-  const yes = selection === "confirm" ? `${REVERSE}[Yes]${RESET}` : "Yes";
-  const no = selection === "cancel" ? `${REVERSE}[No]${RESET}` : "No";
-  const plainChoices = selection === "confirm" ? "[Yes] No" : "Yes [No]";
+  const yes = selection === "confirm" ? `${REVERSE}Yes${RESET}` : "Yes";
+  const no = selection === "cancel" ? `${REVERSE}No${RESET}` : "No";
+  const plainChoices = "Yes No";
   const choices = `${yes} ${no}`;
   const choicesLeft = Math.max(0, columns - visibleLength(plainChoices));
   const top = Math.max(0, Math.floor((rows - 2) / 2));

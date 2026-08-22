@@ -12,11 +12,12 @@ agentsurface confirm --title "Close pane?" -- command arg
 
 `confirm` is the reusable safety boundary for terminal keybindings that would
 otherwise act immediately. It reduces the decision to a question above one
-right-aligned `[Yes] No` row, with Yes selected, executes the exact argv after
-`--` only after interactive confirmation, and refuses to run without a
-terminal. Enter or `y` confirms; `n`, `Esc`, and `q` cancel; arrows, Tab, and
-`h`/`l` move between the choices. Cancellation is a successful no-op, so
-dismissing a Herdr popup does not report a command failure.
+right-aligned `Yes No` row whose selected word is highlighted, executes the
+exact argv after `--` only after interactive confirmation, and refuses to run
+without a terminal. Yes starts selected; Enter or `y` confirms; `n`, `Esc`,
+and `q` cancel; arrows, Tab, and `h`/`l` move between the choices. Cancellation
+is a successful no-op, so dismissing a Herdr popup does not report a command
+failure.
 
 The bundled plugin exposes three compact `Confirm` entrypoints for closing a
 pane, tab, or workspace. AgentStart binds Herdr's normal close keys to those
