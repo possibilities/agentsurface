@@ -435,14 +435,32 @@ describe("runMessage", () => {
     expect(confirmation).toContain('delivered to "planner" (s-plan2, claude)');
   });
 
-  test("a place holding two agents refuses and names their session ids", async () => {
+  test("a place holding two agents refuses and names each one", async () => {
     const error = await expectCliError(
       runMessage(surface().call, { HERDR_PANE_ID: "p2", HERDR_WORKSPACE_ID: "ws2" }, "alpha", "x"),
       "bus_target_ambiguous",
     );
-    expect(error.message).toContain("s-plan");
-    expect(error.message).toContain("s-rev");
+    expect(error.message).toContain('"planner" (session s-plan)');
+    expect(error.message).toContain('"reviewer" (session s-rev)');
     expect(error.recovery).toContain("session id");
+  });
+
+  test("a candidate with no session is named as having none, not by its pane", async () => {
+    const sessionless = [
+      { ...AGENT_ROWS[0], agent_session: null },
+      { ...AGENT_ROWS[1], agent_session: null },
+    ];
+    const error = await expectCliError(
+      runMessage(
+        surface({ agents: sessionless }).call,
+        { HERDR_PANE_ID: "p2", HERDR_WORKSPACE_ID: "ws2" },
+        "alpha",
+        "x",
+      ),
+      "bus_target_ambiguous",
+    );
+    expect(error.message).toContain('"planner" (no session yet)');
+    expect(error.message).not.toContain("p1");
   });
 
   test("a blocked target is reported as undelivered", async () => {

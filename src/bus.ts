@@ -277,8 +277,15 @@ export async function runMessage(
     );
   }
   if (resolution.kind === "ambiguous") {
+    // Every agent the target matched — for a place, everyone working there.
+    // A pane id is not an address on the bus, so an agent whose harness has
+    // reported no session yet is named as having none rather than offered a
+    // token that cannot be resent with.
     const candidates = resolution.candidates
-      .map((candidate) => `"${candidate.name}" (${candidate.sessionId ?? candidate.paneId})`)
+      .map(
+        (candidate) =>
+          `"${candidate.name}" (${candidate.sessionId === null ? "no session yet" : `session ${candidate.sessionId}`})`,
+      )
       .join(", ");
     throw new CliError(
       "bus_target_ambiguous",
