@@ -65,15 +65,20 @@ re-implements neither side.
   why a startup dialog still cannot drop it. The executor prunes the spool
   by age, and the host prunes old evidence logs the same way. JSON answers only;
   success on stdout, errors on stderr.
-- `bus.ts` is the message bus. An agent's name on the bus is the label of
-  the tab hosting its pane — the tab namer's slug, or a hand rename —
-  mutable and collidable, so the session id is the stable address.
-  `agents` joins herdr's `agent list` to `tab list` (the caller's
-  workspace by default, `--all` for the session); `message` resolves a
-  name (sender's workspace first, then the session) or a session id to
-  exactly one agent — a collision errors with candidates, never guesses —
-  and delivers through `herdr agent prompt`, behind a prefix naming the
-  sender (identity from the pane env herdr exports). The prompt response's
+- `bus.ts` is the message bus. An agent answers to three addresses: its
+  name — the label of the tab hosting its pane, the tab namer's slug or a
+  hand rename — its session id, and its place, the workspace it works in,
+  which herdr labels with the worktree's name for a worktree session. Name
+  and place are mutable and collidable, so the session id is the stable
+  address. `agents` joins herdr's `agent list` to `tab list` and
+  `workspace list` (the caller's workspace by default, `--all` for the
+  session, which adds the place column); `message` resolves a name
+  (sender's workspace first, then the session), then a session id, then a
+  place — addressing the one agent working there — to exactly one agent; a
+  collision errors with candidates, never guesses, which is what makes a
+  worktree an address exactly while a single agent holds it. Delivery is
+  through `herdr agent prompt`, behind a prefix naming the sender by every
+  address it answers to (identity from the pane env herdr exports). The prompt response's
   fresh status becomes the confirmation's delivery note: a working target
   queued the message behind its turn; a blocked one rejected it — the
   caller decides whether to linger (`--wait-unblocked`, the delivery

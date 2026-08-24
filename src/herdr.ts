@@ -170,6 +170,10 @@ export async function focusTab(call: HerdrCall, tabId: string): Promise<void> {
 export interface WorkspaceSummary {
   workspaceId: string;
   label: string | null;
+  /** The checkout path when the workspace is a linked git worktree, null
+   * otherwise. Herdr labels such a workspace with the worktree's own name,
+   * which is what makes the worktree addressable on the bus. */
+  worktreePath: string | null;
 }
 
 export async function listWorkspaces(call: HerdrCall): Promise<WorkspaceSummary[]> {
@@ -179,8 +183,19 @@ export async function listWorkspaces(call: HerdrCall): Promise<WorkspaceSummary[
   for (const row of result.workspaces) {
     const workspaceId = (row as { workspace_id?: unknown }).workspace_id;
     const label = (row as { label?: unknown }).label;
+    const worktree = (
+      row as { worktree?: { checkout_path?: unknown; is_linked_worktree?: unknown } | null }
+    ).worktree;
+    const checkoutPath = worktree?.checkout_path;
     if (typeof workspaceId === "string") {
-      summaries.push({ workspaceId, label: typeof label === "string" ? label : null });
+      summaries.push({
+        workspaceId,
+        label: typeof label === "string" ? label : null,
+        worktreePath:
+          worktree?.is_linked_worktree === true && typeof checkoutPath === "string"
+            ? checkoutPath
+            : null,
+      });
     }
   }
   return summaries;

@@ -20,15 +20,23 @@ CLI disagree (`agentsurface --help`), the CLI wins.
 
 ```sh
 agentsurface agents          # live agents in your workspace
-agentsurface agents --all    # the whole surface, with a workspace column
+agentsurface agents --all    # the whole surface, with a place column
 ```
 
-Columns: `name`, `session`, `harness`, `status`, `cwd`. The **name** is the
-label of the tab hosting the agent — usually a slug of its conversation's
-first prompt, set automatically. Names are mutable (a tab rename changes
-them) and can collide; the **session id** is the stable address. An agent
-whose harness hasn't reported a session yet shows `-` and is addressable
-only by name.
+Columns: `name`, `session`, `harness`, `status`, `cwd`, and on `--all` a
+`place`.
+
+An agent answers to three addresses:
+
+- **name** — the label of the tab hosting it, which is a slug of its
+  conversation's first prompt, set automatically. Mutable (a tab rename
+  changes it) and collidable.
+- **session id** — the stable authority; neither mutable nor collidable.
+  An agent whose harness hasn't reported one yet shows `-`.
+- **place** — where it works: its worktree's name, or for a session that
+  is not in a worktree, its workspace's label. A place addresses an agent
+  only while it is the **only** agent there, which for a worktree session
+  is the ordinary case.
 
 The `status` column is worth reading before you send — it tells you what
 delivery will mean (see below).
@@ -39,13 +47,24 @@ delivery will mean (see below).
 agentsurface message <target> "<text>" [--wait-unblocked] [--timeout <ms>]
 ```
 
-The target is a name or a session id. A name is resolved in your workspace
-first, then across the whole surface; if it matches more than one agent,
-the send fails and the error lists the candidates' session ids — resend
-with one of those. Your message arrives behind a prefix naming you:
+The target is a name, a session id, or a place. Resolution runs name first
+(your workspace preferred, then the whole surface), then session id, then
+place — so a name always wins a spelling that is also somebody's worktree.
+
+A worktree name works in either spelling: `worktree-quiet-valley-a17d` as
+herdr labels the workspace, or the short `quiet-valley-a17d` the sidebar
+and the `place` column show.
+
+Whichever tier decides, more than one match fails the send and the error
+lists the candidates' session ids — resend with one of those. Two agents
+sharing a worktree is exactly that case: the worktree stops being an
+address the moment a second agent joins it, so a place that worked
+yesterday can refuse today.
+
+Your message arrives behind a prefix naming every address you answer to:
 
 ```
-Message sent over the agent message bus from agent named "<your-name>" (session <your-id>): <text>
+Message sent over the agent message bus from agent named "<your-name>" (session <your-id>, worktree <your-worktree>): <text>
 ```
 
 so the receiver can reply without any other introduction. The confirmation
@@ -100,9 +119,10 @@ isn't.
 
 ## Receiving and replying
 
-A bus message reaches you as a user turn prefixed with the sender's name
-and session id. Reply over the bus, preferably to the **session id** —
-names can have changed since the message was sent:
+A bus message reaches you as a user turn prefixed with every address the
+sender answers to. Reply over the bus, preferably to the **session id** —
+a name can have changed and a worktree can have gained a second agent
+since the message was sent:
 
 ```sh
 agentsurface message <sender-session-id> "<your reply>"

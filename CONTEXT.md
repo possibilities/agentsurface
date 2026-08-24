@@ -60,9 +60,18 @@ then Enter) behind a prefix naming the sender. _Avoid_: chat, IPC,
 steering — herdr's word for the capability, not this integration's name.
 
 **Name** — An agent's addressable identity on the bus: the label of the
-tab hosting its pane, as the tab namer or a hand rename set it. Mutable
-and collidable — the session id is the stable address — and distinct from
-herdr's opaque launch alias. _Avoid_: alias, handle.
+tab hosting its pane, which the tab namer sets to the conversation's slug
+and a hand rename may replace. Mutable and collidable — the session id is
+the stable address — and distinct from herdr's opaque launch alias.
+_Avoid_: alias, handle.
+
+**Place** — Where an agent works, as a bus address: the workspace hosting
+its pane, which herdr labels with the worktree's own name for a worktree
+session. Addresses an agent only while it is the single one working there,
+and answers to every spelling of that name — the workspace label and the
+checkout's basename, each with and without herdr's `worktree-` prefix.
+_Avoid_: worktree (the place of a non-worktree workspace is its project),
+location.
 
 **Message** — The text one agent sends another over the bus; it lands
 exactly like an operator's typed message, so a working harness queues it

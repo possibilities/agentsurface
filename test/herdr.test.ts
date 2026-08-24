@@ -106,9 +106,37 @@ describe("createWorkspace / createWorktree / createTab", () => {
 describe("surface listings", () => {
   test("read workspaces and panes, tolerating partial rows", async () => {
     const workspaces = fake([
-      { result: { workspaces: [{ workspace_id: "w1", label: "alpha" }, { label: "orphan" }] } },
+      {
+        result: {
+          workspaces: [
+            { workspace_id: "w1", label: "alpha" },
+            {
+              workspace_id: "w2",
+              label: "worktree-quiet-valley",
+              worktree: {
+                checkout_path: "/home/op/.herdr/worktrees/alpha/worktree-quiet-valley",
+                is_linked_worktree: true,
+              },
+            },
+            {
+              workspace_id: "w3",
+              label: "alpha",
+              worktree: { checkout_path: "/code/alpha", is_linked_worktree: false },
+            },
+            { label: "orphan" },
+          ],
+        },
+      },
     ]);
-    expect(await listWorkspaces(workspaces.call)).toEqual([{ workspaceId: "w1", label: "alpha" }]);
+    expect(await listWorkspaces(workspaces.call)).toEqual([
+      { workspaceId: "w1", label: "alpha", worktreePath: null },
+      {
+        workspaceId: "w2",
+        label: "worktree-quiet-valley",
+        worktreePath: "/home/op/.herdr/worktrees/alpha/worktree-quiet-valley",
+      },
+      { workspaceId: "w3", label: "alpha", worktreePath: null },
+    ]);
 
     const panes = fake([
       {

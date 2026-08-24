@@ -4,6 +4,7 @@ import {
   composeBusMessage,
   deliveryNote,
   joinBusAgents,
+  placesByWorkspace,
   renderBusAgents,
   resolveTarget,
   runAgents,
@@ -46,6 +47,20 @@ const AGENT_ROWS = [
   },
 ];
 
+const WORKSPACE_ROWS = [
+  { workspace_id: "ws1", label: "alpha" },
+  {
+    workspace_id: "ws2",
+    label: "worktree-quiet-valley",
+    worktree: {
+      checkout_path: "/home/op/.herdr/worktrees/alpha/worktree-quiet-valley",
+      is_linked_worktree: true,
+      repo_name: "alpha",
+      repo_root: "/home/op/code/alpha",
+    },
+  },
+];
+
 const TAB_ROWS = [
   { tab_id: "t1", workspace_id: "ws1", label: "planner" },
   { tab_id: "t2", workspace_id: "ws1", label: "reviewer" },
@@ -65,6 +80,7 @@ function surface(
     promptErrorTimes?: number;
     agents?: unknown[];
     tabs?: unknown[];
+    workspaces?: unknown[];
     paneSession?: string | null;
   } = {},
 ): FakeSurface {
@@ -77,14 +93,7 @@ function surface(
       return { result: { tabs: options.tabs ?? TAB_ROWS } };
     }
     if (args[0] === "workspace" && args[1] === "list") {
-      return {
-        result: {
-          workspaces: [
-            { workspace_id: "ws1", label: "alpha" },
-            { workspace_id: "ws2", label: null },
-          ],
-        },
-      };
+      return { result: { workspaces: options.workspaces ?? WORKSPACE_ROWS } };
     }
     if (args[0] === "pane" && args[1] === "get") {
       const value = options.paneSession === undefined ? "s-rev" : options.paneSession;
@@ -130,6 +139,14 @@ function busAgents(): BusAgent[] {
       { tabId: "t2", workspaceId: "ws1", label: "reviewer" },
       { tabId: "t3", workspaceId: "ws2", label: "planner" },
     ]),
+    placesByWorkspace([
+      { workspaceId: "ws1", label: "alpha", worktreePath: null },
+      {
+        workspaceId: "ws2",
+        label: "worktree-quiet-valley",
+        worktreePath: "/home/op/.herdr/worktrees/alpha/worktree-quiet-valley",
+      },
+    ]),
   );
 }
 
@@ -166,6 +183,44 @@ describe("joinBusAgents", () => {
   });
 });
 
+describe("placesByWorkspace", () => {
+  test("a linked worktree answers to its name with and without the prefix", () => {
+    const places = placesByWorkspace([
+      {
+        workspaceId: "ws2",
+        label: "worktree-quiet-valley",
+        worktreePath: "/home/op/.herdr/worktrees/alpha/worktree-quiet-valley",
+      },
+    ]);
+    expect(places.get("ws2")).toEqual({
+      name: "quiet-valley",
+      aliases: ["worktree-quiet-valley", "quiet-valley"],
+      isWorktree: true,
+    });
+  });
+
+  test("a renamed worktree workspace keeps the checkout's name as an address", () => {
+    const place = placesByWorkspace([
+      {
+        workspaceId: "ws2",
+        label: "review",
+        worktreePath: "/home/op/.herdr/worktrees/alpha/worktree-quiet-valley",
+      },
+    ]).get("ws2");
+    expect(place?.name).toBe("review");
+    expect(place?.aliases).toEqual(["review", "worktree-quiet-valley", "quiet-valley"]);
+  });
+
+  test("an ordinary workspace is its label; a nameless one has no place", () => {
+    const places = placesByWorkspace([
+      { workspaceId: "ws1", label: "alpha", worktreePath: null },
+      { workspaceId: "ws9", label: null, worktreePath: null },
+    ]);
+    expect(places.get("ws1")).toEqual({ name: "alpha", aliases: ["alpha"], isWorktree: false });
+    expect(places.has("ws9")).toBe(false);
+  });
+});
+
 describe("resolveTarget", () => {
   test("a name in the sender's workspace wins over the same name elsewhere", () => {
     const resolution = resolveTarget(busAgents(), "planner", "ws1");
@@ -190,22 +245,69 @@ describe("resolveTarget", () => {
     expect(resolution).toMatchObject({ kind: "match", agent: { paneId: "p3" } });
   });
 
+  test("a worktree names the one agent working in it, either spelling", () => {
+    for (const spelling of ["worktree-quiet-valley", "quiet-valley"]) {
+      expect(resolveTarget(busAgents(), spelling, "ws1")).toMatchObject({
+        kind: "match",
+        agent: { paneId: "p3" },
+      });
+    }
+  });
+
+  test("a place holding two agents is ambiguous, not a guess", () => {
+    const resolution = resolveTarget(busAgents(), "alpha", "ws2");
+    expect(resolution.kind).toBe("ambiguous");
+    if (resolution.kind === "ambiguous") {
+      expect(resolution.candidates.map((agent) => agent.paneId)).toEqual(["p1", "p2"]);
+    }
+  });
+
+  test("a name beats a place that shares the spelling", () => {
+    const agents = busAgents().map((agent) =>
+      agent.paneId === "p1" ? { ...agent, name: "quiet-valley" } : agent,
+    );
+    expect(resolveTarget(agents, "quiet-valley", null)).toMatchObject({
+      kind: "match",
+      agent: { paneId: "p1" },
+    });
+  });
+
   test("no match is reported as none", () => {
     expect(resolveTarget(busAgents(), "stranger", "ws1").kind).toBe("none");
   });
 });
 
 describe("composeBusMessage", () => {
-  test("prefixes the sender's name and session", () => {
-    expect(composeBusMessage({ name: "reviewer", sessionId: "s-rev" }, "hello")).toBe(
-      'Message sent over the agent message bus from agent named "reviewer" (session s-rev): hello',
+  const worktree = { name: "quiet-valley", aliases: ["quiet-valley"], isWorktree: true };
+
+  test("prefixes every address the sender answers to", () => {
+    expect(
+      composeBusMessage({ name: "reviewer", sessionId: "s-rev", place: worktree }, "hello"),
+    ).toBe(
+      'Message sent over the agent message bus from agent named "reviewer" (session s-rev, worktree quiet-valley): hello',
     );
   });
 
-  test("omits the session clause when the sender has none", () => {
-    expect(composeBusMessage({ name: "reviewer", sessionId: null }, "hello")).toBe(
+  test("a place that is not a worktree is named a workspace", () => {
+    expect(
+      composeBusMessage(
+        {
+          name: "reviewer",
+          sessionId: "s-rev",
+          place: { name: "alpha", aliases: ["alpha"], isWorktree: false },
+        },
+        "hello",
+      ),
+    ).toContain("(session s-rev, workspace alpha)");
+  });
+
+  test("omits the clauses the sender has none of", () => {
+    expect(composeBusMessage({ name: "reviewer", sessionId: null, place: null }, "hello")).toBe(
       'Message sent over the agent message bus from agent named "reviewer": hello',
     );
+    expect(
+      composeBusMessage({ name: "reviewer", sessionId: null, place: worktree }, "hello"),
+    ).toContain('named "reviewer" (worktree quiet-valley)');
   });
 });
 
@@ -222,7 +324,7 @@ describe("renderBusAgents", () => {
   test("aligns columns and shortens cwd to ~", () => {
     const rendered = renderBusAgents(busAgents().slice(0, 2), {
       home: "/home/op",
-      workspaceLabels: null,
+      places: false,
     });
     const lines = rendered.split("\n");
     expect(lines[0]).toBe("name      session  harness  status   cwd");
@@ -230,16 +332,18 @@ describe("renderBusAgents", () => {
     expect(lines[2]).toBe("reviewer  s-rev    codex    idle     ~/code/reviewer");
   });
 
-  test("the session-wide view adds a workspace column, label or id", () => {
-    const rendered = renderBusAgents(busAgents(), {
-      home: "/home/op",
-      workspaceLabels: new Map([["ws1", "alpha"]]),
-    });
+  test("the session-wide view adds a place column, worktree name or label", () => {
+    const rendered = renderBusAgents(busAgents(), { home: "/home/op", places: true });
     const lines = rendered.split("\n");
-    expect(lines[0]).toContain("workspace");
+    expect(lines[0]).toContain("place");
     expect(lines[1]).toContain("alpha");
-    expect(lines[3]).toContain("ws2");
-    expect(lines[3]).toContain("-");
+    expect(lines[3]).toContain("quiet-valley");
+  });
+
+  test("a workspace with no place falls back to its id, never a blank cell", () => {
+    const placeless = busAgents().map((agent) => ({ ...agent, place: null }));
+    const rendered = renderBusAgents(placeless.slice(2), { home: "/home/op", places: true });
+    expect(rendered.split("\n")[1]).toContain("ws2");
   });
 });
 
@@ -249,14 +353,15 @@ describe("runAgents", () => {
     const listed = await runAgents(fake.call, { HERDR_WORKSPACE_ID: "ws1" }, "/home/op", false);
     expect(listed).toContain("reviewer");
     expect(listed).not.toContain("s-plan2");
-    expect(listed).not.toContain("workspace");
+    expect(listed).not.toContain("place");
   });
 
-  test("--all lists the whole session with workspaces", async () => {
+  test("--all lists the whole session with places", async () => {
     const fake = surface();
     const listed = await runAgents(fake.call, { HERDR_WORKSPACE_ID: "ws1" }, "/home/op", true);
     expect(listed).toContain("s-plan2");
     expect(listed).toContain("alpha");
+    expect(listed).toContain("quiet-valley");
   });
 
   test("no workspace in the environment behaves as --all", async () => {
@@ -282,7 +387,7 @@ describe("runMessage", () => {
     expect(fake.prompts).toEqual([
       [
         "p1",
-        'Message sent over the agent message bus from agent named "reviewer" (session s-rev): hello',
+        'Message sent over the agent message bus from agent named "reviewer" (session s-rev, workspace alpha): hello',
       ],
     ]);
     expect(confirmation).toBe(
@@ -303,7 +408,7 @@ describe("runMessage", () => {
     const fake = surface({ paneSession: null });
     await runMessage(fake.call, SENDER_ENV, "planner", "hello");
     expect(fake.prompts[0]?.[1]).toBe(
-      'Message sent over the agent message bus from agent named "reviewer": hello',
+      'Message sent over the agent message bus from agent named "reviewer" (workspace alpha): hello',
     );
   });
 
@@ -321,6 +426,23 @@ describe("runMessage", () => {
       runMessage(surface().call, SENDER_ENV, "stranger", "hello"),
       "bus_target_not_found",
     );
+  });
+
+  test("a worktree name addresses the one agent working there", async () => {
+    const fake = surface({ promptStatus: "idle" });
+    const confirmation = await runMessage(fake.call, SENDER_ENV, "quiet-valley", "hello");
+    expect(fake.prompts[0]?.[0]).toBe("p3");
+    expect(confirmation).toContain('delivered to "planner" (s-plan2, claude)');
+  });
+
+  test("a place holding two agents refuses and names their session ids", async () => {
+    const error = await expectCliError(
+      runMessage(surface().call, { HERDR_PANE_ID: "p2", HERDR_WORKSPACE_ID: "ws2" }, "alpha", "x"),
+      "bus_target_ambiguous",
+    );
+    expect(error.message).toContain("s-plan");
+    expect(error.message).toContain("s-rev");
+    expect(error.recovery).toContain("session id");
   });
 
   test("a blocked target is reported as undelivered", async () => {

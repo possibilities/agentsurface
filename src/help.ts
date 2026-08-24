@@ -38,12 +38,15 @@ Commands:
             transcript head. Built for the resume picker's listing.
   agents    List the surface's live agents — name (the tab's label), session
             id, harness, status, cwd. Agents in the caller's workspace by
-            default; --all lists the whole session.
+            default; --all lists the whole session and adds each agent's
+            place — its worktree name, or its workspace label.
   message   Send text to another agent over the message bus. The target is a
-            name or a session id; herdr types the message into the target's
-            harness like an operator message, behind a prefix naming the
-            sender. A working target queues it; a blocked target rejects it
-            (--wait-unblocked lingers and retries until --timeout, 120s
+            name, a session id, or a place holding exactly one agent (a
+            worktree name, with or without herdr's worktree- prefix); herdr
+            types the message into the target's harness like an operator
+            message, behind a prefix naming the sender by every address it
+            answers to. A working target queues it; a blocked target rejects
+            it (--wait-unblocked lingers and retries until --timeout, 120s
             default, then reports the message undelivered).
 
 Files:
