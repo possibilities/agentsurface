@@ -145,26 +145,15 @@ describe("reportSidebarProjectToken", () => {
     const call: HerdrCall = async (args) => {
       calls.push(args);
       if (args[0] === "pane" && args[1] === "get") {
-        return { result: { pane: { workspace_id: "ws_1" } } };
+        return { result: { pane: { workspace_id: "ws_1", cwd: "/worktrees/clear-valley/src" } } };
       }
       if (args[0] === "workspace" && args[1] === "get") {
-        return {
-          result: {
-            workspace: {
-              label: "worktree-clear-valley-003a",
-              worktree: {
-                checkout_path: "/worktrees/clear-valley",
-                is_linked_worktree: true,
-                repo_name: "agentvoice",
-                repo_root: "/code/agentvoice",
-              },
-            },
-          },
-        };
+        return { result: { workspace: { label: "worktree-clear-valley-003a" } } };
       }
       if (args[0] === "worktree" && args[1] === "list") {
         return {
           result: {
+            source: { repo_name: "agentvoice", source_checkout_path: "/worktrees/clear-valley" },
             worktrees: [
               { branch: "main", path: "/code/agentvoice" },
               { branch: "worktree/clear-valley-003a", path: "/worktrees/clear-valley" },
@@ -178,6 +167,7 @@ describe("reportSidebarProjectToken", () => {
 
     await reportSidebarProjectToken(call, "pane_1");
 
+    expect(calls[2]).toEqual(["worktree", "list", "--cwd", "/worktrees/clear-valley/src"]);
     expect(calls[3]).toEqual([
       "pane",
       "report-metadata",
@@ -185,7 +175,7 @@ describe("reportSidebarProjectToken", () => {
       "--source",
       "agentsurface:sidebar",
       "--token",
-      "project=agentvoice  clear-valley-003a",
+      "project=agentvoice \ue725 clear-valley-003a",
     ]);
   });
 
@@ -194,25 +184,18 @@ describe("reportSidebarProjectToken", () => {
     const call: HerdrCall = async (args) => {
       calls.push(args);
       if (args[0] === "pane" && args[1] === "get") {
-        return { result: { pane: { workspace_id: "ws_1" } } };
+        return { result: { pane: { workspace_id: "ws_1", cwd: "/code/funk" } } };
       }
       if (args[0] === "workspace" && args[1] === "get") {
-        return {
-          result: {
-            workspace: {
-              label: "hand-renamed",
-              worktree: {
-                checkout_path: "/code/funk",
-                is_linked_worktree: false,
-                repo_name: "funk",
-                repo_root: "/code/funk",
-              },
-            },
-          },
-        };
+        return { result: { workspace: { label: "hand-renamed" } } };
       }
       if (args[0] === "worktree" && args[1] === "list") {
-        return { result: { worktrees: [{ branch: "main", path: "/code/funk" }] } };
+        return {
+          result: {
+            source: { repo_name: "funk", source_checkout_path: "/code/funk" },
+            worktrees: [{ branch: "main", path: "/code/funk" }],
+          },
+        };
       }
       if (args[0] === "pane" && args[1] === "report-metadata") return { result: {} };
       throw new Error(`unexpected herdr call: ${args.join(" ")}`);
@@ -227,11 +210,75 @@ describe("reportSidebarProjectToken", () => {
       "--source",
       "agentsurface:sidebar",
       "--token",
-      "project=funk  main",
+      "project=funk \ue725 main",
     ]);
   });
 
+  test("a workspace bound before its directory became a repository still reports it", async () => {
+    // herdr binds a workspace's worktree record at creation and never moves
+    // it; the pane's cwd is what actually says where the agent is working.
+    const calls: string[][] = [];
+    const call: HerdrCall = async (args) => {
+      calls.push(args);
+      if (args[0] === "pane" && args[1] === "get") {
+        return { result: { pane: { workspace_id: "ws_1", cwd: "/src/fx" } } };
+      }
+      if (args[0] === "workspace" && args[1] === "get") {
+        return { result: { workspace: { label: "fx" } } };
+      }
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          result: {
+            source: { repo_name: "fx", source_checkout_path: "/src/fx" },
+            worktrees: [{ branch: "integration", path: "/src/fx" }],
+          },
+        };
+      }
+      if (args[0] === "pane" && args[1] === "report-metadata") return { result: {} };
+      throw new Error(`unexpected herdr call: ${args.join(" ")}`);
+    };
+
+    await reportSidebarProjectToken(call, "pane_1");
+
+    expect(calls[3]?.at(-1)).toBe("project=fx \ue725 integration");
+  });
+
   test("keeps the workspace label when no repository backs it", async () => {
+    const calls: string[][] = [];
+    const call: HerdrCall = async (args) => {
+      calls.push(args);
+      if (args[0] === "pane" && args[1] === "get") {
+        return { result: { pane: { workspace_id: "ws_1", cwd: "/code" } } };
+      }
+      if (args[0] === "workspace" && args[1] === "get") {
+        return { result: { workspace: { label: "code" } } };
+      }
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          error: {
+            code: "not_git_worktree",
+            message: "Herdr worktree actions require a path inside a Git work tree",
+          },
+        };
+      }
+      if (args[0] === "pane" && args[1] === "report-metadata") return { result: {} };
+      throw new Error(`unexpected herdr call: ${args.join(" ")}`);
+    };
+
+    await reportSidebarProjectToken(call, "pane_1");
+
+    expect(calls[3]).toEqual([
+      "pane",
+      "report-metadata",
+      "pane_1",
+      "--source",
+      "agentsurface:sidebar",
+      "--token",
+      "project=code",
+    ]);
+  });
+
+  test("a pane herdr reports no cwd for keeps the workspace label", async () => {
     const calls: string[][] = [];
     const call: HerdrCall = async (args) => {
       calls.push(args);
@@ -247,15 +294,7 @@ describe("reportSidebarProjectToken", () => {
 
     await reportSidebarProjectToken(call, "pane_1");
 
-    expect(calls[2]).toEqual([
-      "pane",
-      "report-metadata",
-      "pane_1",
-      "--source",
-      "agentsurface:sidebar",
-      "--token",
-      "project=code",
-    ]);
+    expect(calls[2]?.at(-1)).toBe("project=code");
   });
 });
 

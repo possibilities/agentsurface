@@ -81,53 +81,36 @@ export function parsePaneEvent(eventJson: string): PaneEvent | null {
  * checkout — a linked worktree or the repository's own — reads as the root
  * repository name plus the branch it has checked out, so the row names the
  * project rather than whichever directory herdr happened to label the
- * workspace with. A workspace over no repository keeps that label. */
+ * workspace with. A pane over no repository keeps the workspace label.
+ *
+ * The pane's own cwd is what herdr is asked about, not the workspace's
+ * worktree record: that record is bound when the workspace is created and
+ * does not follow the pane, so a workspace opened before its directory
+ * became a repository carries none at all. One `worktree list` from the
+ * pane's cwd answers both halves — its `source` names the repository, and
+ * the matching entry names the branch. */
 export async function reportSidebarProjectToken(call: HerdrCall, paneId: string): Promise<void> {
   const paneResult = (await invoke(call, ["pane", "get", paneId])) as {
-    pane?: { workspace_id?: unknown };
+    pane?: { workspace_id?: unknown; cwd?: unknown };
   } | null;
   const workspaceId = paneResult?.pane?.workspace_id;
   if (typeof workspaceId !== "string" || workspaceId === "") {
     throw new HerdrError("herdr's pane response named no workspace");
   }
+  const paneCwd = paneResult?.pane?.cwd;
 
   const workspaceResult = (await invoke(call, ["workspace", "get", workspaceId])) as {
-    workspace?: {
-      label?: unknown;
-      worktree?: {
-        checkout_path?: unknown;
-        repo_name?: unknown;
-        repo_root?: unknown;
-      } | null;
-    };
+    workspace?: { label?: unknown };
   } | null;
-  const workspace = workspaceResult?.workspace;
-  const label = workspace?.label;
+  const label = workspaceResult?.workspace?.label;
   if (typeof label !== "string" || label === "") {
     throw new HerdrError("herdr's workspace response named no label");
   }
-  const worktree = workspace?.worktree;
+
   let project = label;
-  if (
-    typeof worktree?.repo_name === "string" &&
-    typeof worktree.repo_root === "string" &&
-    typeof worktree.checkout_path === "string"
-  ) {
-    // herdr's worktree list is the only place a checkout's branch is
-    // reported, and it lists the repository's own checkout beside its
-    // linked worktrees — so one call answers both cases.
-    const listResult = (await invoke(call, ["worktree", "list", "--cwd", worktree.repo_root])) as {
-      worktrees?: unknown;
-    } | null;
-    const entry = Array.isArray(listResult?.worktrees)
-      ? listResult.worktrees.find(
-          (candidate) => (candidate as { path?: unknown }).path === worktree.checkout_path,
-        )
-      : undefined;
-    const branch = (entry as { branch?: unknown } | undefined)?.branch;
-    const displayBranch =
-      typeof branch === "string" && branch !== "" ? branch.replace(/^worktree\//, "") : "detached";
-    project = `${worktree.repo_name} ${BRANCH_MARKER} ${displayBranch}`;
+  if (typeof paneCwd === "string" && paneCwd !== "") {
+    const checkout = await checkoutForCwd(call, paneCwd);
+    if (checkout !== null) project = checkout;
   }
 
   await invoke(call, [
@@ -139,6 +122,34 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
     "--token",
     `project=${project}`,
   ]);
+}
+
+/** `<repo> <marker> <branch>` for the checkout holding `cwd`, or null when
+ * herdr reports no work tree there — the pane sits outside a repository,
+ * and the workspace's own label is the honest name. */
+async function checkoutForCwd(call: HerdrCall, cwd: string): Promise<string | null> {
+  let listResult: {
+    source?: { repo_name?: unknown; source_checkout_path?: unknown };
+    worktrees?: unknown;
+  } | null;
+  try {
+    listResult = (await invoke(call, ["worktree", "list", "--cwd", cwd])) as typeof listResult;
+  } catch (error) {
+    if (error instanceof HerdrError) return null;
+    throw error;
+  }
+  const repoName = listResult?.source?.repo_name;
+  const checkoutPath = listResult?.source?.source_checkout_path;
+  if (typeof repoName !== "string" || repoName === "") return null;
+  const entry = Array.isArray(listResult?.worktrees)
+    ? listResult.worktrees.find(
+        (candidate) => (candidate as { path?: unknown }).path === checkoutPath,
+      )
+    : undefined;
+  const branch = (entry as { branch?: unknown } | undefined)?.branch;
+  const displayBranch =
+    typeof branch === "string" && branch !== "" ? branch.replace(/^worktree\//, "") : "detached";
+  return `${repoName} ${BRANCH_MARKER} ${displayBranch}`;
 }
 
 async function reportConversationValue(
