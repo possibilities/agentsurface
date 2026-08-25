@@ -54,10 +54,11 @@ export interface PaneEvent {
 const SIDEBAR_METADATA_SOURCE = "agentsurface:sidebar";
 const UNTITLED_CONVERSATION = "untitled agent";
 const BRANCH_MARKER = "";
-/** A pane outside any work tree gets a folder, not a branch: the row still
- * reads as two halves, and the glyph says why the second one is not a
- * branch name. */
-const UNTRACKED_MARKER = "";
+/** A pane outside any work tree keeps the row's two-part shape, and this
+ * marker says the second half is not a branch. Plain Unicode rather than
+ * the branch marker's Nerd Font glyph: nothing here needs a patched font,
+ * and the multiplication sign reads small at the sidebar's weight. */
+const UNTRACKED_MARKER = "×";
 const UNTRACKED_BRANCH = "untracked";
 
 export function parsePaneEvent(eventJson: string): PaneEvent | null {

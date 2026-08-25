@@ -274,7 +274,7 @@ describe("reportSidebarProjectToken", () => {
       "--source",
       "agentsurface:sidebar",
       "--token",
-      "project=code  untracked",
+      "project=code × untracked",
     ]);
   });
 
@@ -294,7 +294,7 @@ describe("reportSidebarProjectToken", () => {
 
     await reportSidebarProjectToken(call, "pane_1");
 
-    expect(calls[2]?.at(-1)).toBe("project=code  untracked");
+    expect(calls[2]?.at(-1)).toBe("project=code × untracked");
   });
 });
 
