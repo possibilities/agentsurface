@@ -53,7 +53,7 @@ export interface PaneEvent {
 
 const SIDEBAR_METADATA_SOURCE = "agentsurface:sidebar";
 const UNTITLED_CONVERSATION = "untitled agent";
-const WORKTREE_MARKER = "";
+const BRANCH_MARKER = "";
 
 export function parsePaneEvent(eventJson: string): PaneEvent | null {
   let parsed: unknown;
@@ -77,9 +77,11 @@ export function parsePaneEvent(eventJson: string): PaneEvent | null {
   return { kind, paneId, released: (data as { released?: unknown }).released === true };
 }
 
-/** Publish the label consumed by Herdr's configurable Agent sidebar. Linked
- * worktrees use the root repository name plus their branch; ordinary
- * workspaces preserve Herdr's current workspace label. */
+/** Publish the label consumed by Herdr's configurable Agent sidebar. Every
+ * checkout — a linked worktree or the repository's own — reads as the root
+ * repository name plus the branch it has checked out, so the row names the
+ * project rather than whichever directory herdr happened to label the
+ * workspace with. A workspace over no repository keeps that label. */
 export async function reportSidebarProjectToken(call: HerdrCall, paneId: string): Promise<void> {
   const paneResult = (await invoke(call, ["pane", "get", paneId])) as {
     pane?: { workspace_id?: unknown };
@@ -94,7 +96,6 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
       label?: unknown;
       worktree?: {
         checkout_path?: unknown;
-        is_linked_worktree?: unknown;
         repo_name?: unknown;
         repo_root?: unknown;
       } | null;
@@ -108,12 +109,13 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
   const worktree = workspace?.worktree;
   let project = label;
   if (
-    worktree?.is_linked_worktree === true &&
-    typeof worktree.repo_name === "string" &&
+    typeof worktree?.repo_name === "string" &&
     typeof worktree.repo_root === "string" &&
     typeof worktree.checkout_path === "string"
   ) {
-    project = worktree.repo_name;
+    // herdr's worktree list is the only place a checkout's branch is
+    // reported, and it lists the repository's own checkout beside its
+    // linked worktrees — so one call answers both cases.
     const listResult = (await invoke(call, ["worktree", "list", "--cwd", worktree.repo_root])) as {
       worktrees?: unknown;
     } | null;
@@ -125,10 +127,10 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
     const branch = (entry as { branch?: unknown } | undefined)?.branch;
     const displayBranch =
       typeof branch === "string" && branch !== "" ? branch.replace(/^worktree\//, "") : "detached";
-    project = `${project} ${WORKTREE_MARKER} ${displayBranch}`;
+    project = `${worktree.repo_name} ${BRANCH_MARKER} ${displayBranch}`;
   }
 
-  const reportArgs = [
+  await invoke(call, [
     "pane",
     "report-metadata",
     paneId,
@@ -136,9 +138,7 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
     SIDEBAR_METADATA_SOURCE,
     "--token",
     `project=${project}`,
-  ];
-  reportArgs.push("--clear-token", "worktree");
-  await invoke(call, reportArgs);
+  ]);
 }
 
 async function reportConversationValue(

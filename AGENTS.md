@@ -128,8 +128,10 @@ re-implements neither side.
   geometry while preserving the active topology ids in plugin context. Its
   `pane.agent_detected` and `pane.agent_status_changed` hooks both run
   `agentsurface name-tab`; `tab-namer.ts` publishes the `$project` sidebar
-  token on detection only (the current workspace label, or the root
-  repository name plus its worktree branch), and each hook run is one
+  token on detection only (the root repository name plus the branch the
+  pane's checkout has out — a linked worktree's or the repository's own —
+  falling back to the workspace label off any repository), and each hook
+  run is one
   bounded naming attempt: poll the pane for its agent session, claim the
   tab in the plugin's state directory (a `pending <pid>` state file,
   rewritten to `named` after the rename; a dead claimant's pending claim

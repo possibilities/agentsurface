@@ -186,12 +186,10 @@ describe("reportSidebarProjectToken", () => {
       "agentsurface:sidebar",
       "--token",
       "project=agentvoice  clear-valley-003a",
-      "--clear-token",
-      "worktree",
     ]);
   });
 
-  test("preserves the workspace label outside a linked worktree", async () => {
+  test("names the branch of a repository's own checkout too", async () => {
     const calls: string[][] = [];
     const call: HerdrCall = async (args) => {
       calls.push(args);
@@ -203,10 +201,45 @@ describe("reportSidebarProjectToken", () => {
           result: {
             workspace: {
               label: "hand-renamed",
-              worktree: { is_linked_worktree: false, repo_name: "repo" },
+              worktree: {
+                checkout_path: "/code/funk",
+                is_linked_worktree: false,
+                repo_name: "funk",
+                repo_root: "/code/funk",
+              },
             },
           },
         };
+      }
+      if (args[0] === "worktree" && args[1] === "list") {
+        return { result: { worktrees: [{ branch: "main", path: "/code/funk" }] } };
+      }
+      if (args[0] === "pane" && args[1] === "report-metadata") return { result: {} };
+      throw new Error(`unexpected herdr call: ${args.join(" ")}`);
+    };
+
+    await reportSidebarProjectToken(call, "pane_1");
+
+    expect(calls[3]).toEqual([
+      "pane",
+      "report-metadata",
+      "pane_1",
+      "--source",
+      "agentsurface:sidebar",
+      "--token",
+      "project=funk  main",
+    ]);
+  });
+
+  test("keeps the workspace label when no repository backs it", async () => {
+    const calls: string[][] = [];
+    const call: HerdrCall = async (args) => {
+      calls.push(args);
+      if (args[0] === "pane" && args[1] === "get") {
+        return { result: { pane: { workspace_id: "ws_1" } } };
+      }
+      if (args[0] === "workspace" && args[1] === "get") {
+        return { result: { workspace: { label: "code" } } };
       }
       if (args[0] === "pane" && args[1] === "report-metadata") return { result: {} };
       throw new Error(`unexpected herdr call: ${args.join(" ")}`);
@@ -221,9 +254,7 @@ describe("reportSidebarProjectToken", () => {
       "--source",
       "agentsurface:sidebar",
       "--token",
-      "project=hand-renamed",
-      "--clear-token",
-      "worktree",
+      "project=code",
     ]);
   });
 });
