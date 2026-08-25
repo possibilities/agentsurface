@@ -91,6 +91,20 @@ re-implements neither side.
   argv spawn only after interactive confirmation. It owns no Herdr topology;
   the plugin's internal `close-active` command reads the pane entrypoint's
   captured context and phrases the public Herdr close command.
+- `browser-pane.ts` is the browser pane: agentweb's headed browsers watched
+  and handed over from inside herdr. A pure model (`reduceKey`, the palette,
+  `dockFrame`) under a loop that polls `agentweb browser list` and
+  `attention list`, reads its own geometry (herdr's cell rect for the pane,
+  the client's cell size over the socket, the outer terminal window's origin
+  and Space from yabai), and asks the daemon to dock the real Chrome window
+  over the pane — `agentweb browser window dock` with the pane's Space — or
+  park it. A queued attention item is attended automatically and docked with
+  focus; `r` releases with the capability agentweb minted, `p` parks. The
+  window follows the pane: re-placed on resize, parked while the pane is
+  hidden, back when shown. Agentsurface never touches the browser, only its
+  window's placement through agentweb; nothing typed into the window crosses
+  it. The plugin's `browser` entrypoint is a split for that reason — a popup
+  has no stable rectangle to dock over.
 - `close.ts` is that narrow internal context bridge. It accepts only `pane`,
   `tab`, or `workspace`, requires the corresponding id in
   `HERDR_PLUGIN_CONTEXT_JSON`, and delegates the close to Herdr's CLI.

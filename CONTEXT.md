@@ -83,6 +83,16 @@ argv runs. It presents only the caller's question and `Yes / No`, with Yes
 selected; a non-interactive invocation still refuses the command. _Avoid_:
 prompt, approval gate.
 
+**Browser pane** — The `browser` integration: a herdr split pane that lists
+agentweb's browsers and attention items and has the daemon dock a headed
+browser's real window over the pane's own rectangle, to watch it or to attend
+its wall. Agentweb's own words for the window states are parked and docked.
+_Avoid_: browser viewer, embedded browser, live view.
+
+**Readout** — The bottom rows of the browser pane a docked window never
+covers: which browser is docked, why, and the keys that end it. _Avoid_:
+status bar, footer.
+
 **Metadata level** — The catalog's designated cheap `model:effort` pair for
 metadata completions (slugs, and later summaries): declared per harness in
 agentlaunch's catalog, read from `x-catalog` as one `metadata_level` value,

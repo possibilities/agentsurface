@@ -9,6 +9,7 @@ Usage:
   agentsurface conversation describe < requests.jsonl
   agentsurface agents [--all]
   agentsurface message <target> "<text>" [--wait-unblocked] [--timeout <ms>]
+  agentsurface browser
   agentsurface --help | --version
 
 Commands:
@@ -48,6 +49,15 @@ Commands:
             answers to. A working target queues it; a blocked target rejects
             it (--wait-unblocked lingers and retries until --timeout, 120s
             default, then reports the message undelivered).
+  browser   The browser pane: agentweb's headed browsers, watched and handed
+            over from inside herdr. Lists the daemon's browsers and open
+            attention items; Enter docks the selected browser's real Chrome
+            window over this pane to watch it (clicks reach the site), and a
+            queued attention item is attended automatically — the window is
+            docked with focus, you solve the wall in it, r releases it back to
+            the agent, p parks it out of sight. Runs inside a herdr pane
+            (the plugin's split entrypoint) against the agentweb daemon;
+            AGENTSURFACE_AGENTWEB overrides the agentweb command under test.
 
 Files:
   directive.schema.json (checked in)            the session directive format

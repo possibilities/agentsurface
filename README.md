@@ -2,7 +2,21 @@
 
 AgentSurface ties the `~/code/agent*` fleet to [herdr](https://github.com/wilkystyle/herdr),
 the terminal workspace manager fleet agents run inside. Its integrations host
-fleet TUIs, name conversations, connect agents, and guard terminal commands.
+fleet TUIs, name conversations, connect agents, guard terminal commands, and
+put agentweb's browsers inside herdr.
+
+## Browser pane
+
+```sh
+herdr plugin pane open --plugin agentsurface --entrypoint browser --placement split --no-focus
+```
+
+The pane lists agentweb's browsers and open attention items. Enter docks the
+selected headed browser's real Chrome window over the pane to watch the agent
+drive it (clicks reach the site); a queued attention item is attended
+automatically and docked with focus, you solve the wall in the window, `r`
+releases it back to the agent, `p` parks it out of sight. Agentweb keeps every
+headed window parked otherwise, so nothing appears on screen unannounced.
 
 ## Confirmation
 

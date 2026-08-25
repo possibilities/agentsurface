@@ -102,6 +102,24 @@ async function main(argv: string[]): Promise<number> {
       return 1;
     }
   }
+  if (first === "browser") {
+    if (argv.length > 1) {
+      console.error("browser takes no arguments");
+      return 2;
+    }
+    try {
+      const { createBrowserPane } = await import("./browser-pane.ts");
+      return await createBrowserPane(process.env, process.env["HOME"] ?? "").run();
+    } catch (error) {
+      if (error instanceof CliError || error instanceof HerdrError) {
+        console.error(`error: ${error.message}`);
+      } else {
+        console.error(`error: ${(error as Error).message ?? String(error)}`);
+      }
+      await holdForKeypress();
+      return 1;
+    }
+  }
   if (first === "close-active") {
     try {
       await closeActive(createHerdrCall(process.env), process.env, argv.slice(1));
