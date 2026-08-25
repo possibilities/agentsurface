@@ -243,7 +243,7 @@ describe("reportSidebarProjectToken", () => {
     expect(calls[3]?.at(-1)).toBe("project=fx \ue725 integration");
   });
 
-  test("keeps the workspace label when no repository backs it", async () => {
+  test("badges the workspace label as untracked when no repository backs it", async () => {
     const calls: string[][] = [];
     const call: HerdrCall = async (args) => {
       calls.push(args);
@@ -274,11 +274,11 @@ describe("reportSidebarProjectToken", () => {
       "--source",
       "agentsurface:sidebar",
       "--token",
-      "project=code",
+      "project=code  untracked",
     ]);
   });
 
-  test("a pane herdr reports no cwd for keeps the workspace label", async () => {
+  test("a pane herdr reports no cwd for reads as untracked too", async () => {
     const calls: string[][] = [];
     const call: HerdrCall = async (args) => {
       calls.push(args);
@@ -294,7 +294,7 @@ describe("reportSidebarProjectToken", () => {
 
     await reportSidebarProjectToken(call, "pane_1");
 
-    expect(calls[2]?.at(-1)).toBe("project=code");
+    expect(calls[2]?.at(-1)).toBe("project=code  untracked");
   });
 });
 

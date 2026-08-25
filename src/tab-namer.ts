@@ -54,6 +54,11 @@ export interface PaneEvent {
 const SIDEBAR_METADATA_SOURCE = "agentsurface:sidebar";
 const UNTITLED_CONVERSATION = "untitled agent";
 const BRANCH_MARKER = "";
+/** A pane outside any work tree gets a folder, not a branch: the row still
+ * reads as two halves, and the glyph says why the second one is not a
+ * branch name. */
+const UNTRACKED_MARKER = "";
+const UNTRACKED_BRANCH = "untracked";
 
 export function parsePaneEvent(eventJson: string): PaneEvent | null {
   let parsed: unknown;
@@ -81,7 +86,8 @@ export function parsePaneEvent(eventJson: string): PaneEvent | null {
  * checkout — a linked worktree or the repository's own — reads as the root
  * repository name plus the branch it has checked out, so the row names the
  * project rather than whichever directory herdr happened to label the
- * workspace with. A pane over no repository keeps the workspace label.
+ * workspace with. A pane over no repository reads as the workspace label
+ * badged "untracked", so the row keeps its two-part shape either way.
  *
  * The pane's own cwd is what herdr is asked about, not the workspace's
  * worktree record: that record is bound when the workspace is created and
@@ -107,7 +113,7 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
     throw new HerdrError("herdr's workspace response named no label");
   }
 
-  let project = label;
+  let project = `${label} ${UNTRACKED_MARKER} ${UNTRACKED_BRANCH}`;
   if (typeof paneCwd === "string" && paneCwd !== "") {
     const checkout = await checkoutForCwd(call, paneCwd);
     if (checkout !== null) project = checkout;
@@ -126,7 +132,7 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
 
 /** `<repo> <marker> <branch>` for the checkout holding `cwd`, or null when
  * herdr reports no work tree there — the pane sits outside a repository,
- * and the workspace's own label is the honest name. */
+ * and the caller badges the workspace label as untracked instead. */
 async function checkoutForCwd(call: HerdrCall, cwd: string): Promise<string | null> {
   let listResult: {
     source?: { repo_name?: unknown; source_checkout_path?: unknown };
