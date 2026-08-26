@@ -9,6 +9,7 @@ import {
   reportSidebarProjectToken,
   runTabNamer,
   type SlugOutcome,
+  sessionClaimScope,
 } from "../src/tab-namer.ts";
 
 let roots: string[] = [];
@@ -100,6 +101,11 @@ function surface(
 }
 
 const CLAUDE_SESSION = { source: "herdr:claude", agent: "claude", kind: "id", value: "abc-123" };
+const SESSION_SCOPE = "surface-a";
+
+function claimPath(dir: string, scope = SESSION_SCOPE): string {
+  return join(dir, "named-tabs", scope, "tab_1");
+}
 
 function namer(
   fake: FakeSurface,
@@ -110,6 +116,7 @@ function namer(
   return runTabNamer({
     call: fake.call,
     stateDir: dir,
+    sessionScope: SESSION_SCOPE,
     eventJson: EVENT,
     slug: slug as never,
     sleep: async () => {},
@@ -301,7 +308,7 @@ describe("reportSidebarProjectToken", () => {
 describe("reportConversationToken", () => {
   test("an unclaimed tab gets the untitled placeholder", async () => {
     const fake = surface(null);
-    await reportConversationToken(fake.call, "pane_1", stateDir());
+    await reportConversationToken(fake.call, "pane_1", stateDir(), SESSION_SCOPE);
     expect(fake.reports).toEqual([
       ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=untitled agent"],
     ]);
@@ -310,9 +317,9 @@ describe("reportConversationToken", () => {
   test("a pending claim still reads as untitled", async () => {
     const fake = surface(null);
     const dir = stateDir();
-    mkdirSync(join(dir, "named-tabs"), { recursive: true });
-    writeFileSync(join(dir, "named-tabs", "tab_1"), "pending 99999\n");
-    await reportConversationToken(fake.call, "pane_1", dir);
+    mkdirSync(join(dir, "named-tabs", SESSION_SCOPE), { recursive: true });
+    writeFileSync(claimPath(dir), "pending 99999\n");
+    await reportConversationToken(fake.call, "pane_1", dir, SESSION_SCOPE);
     expect(fake.reports).toEqual([
       ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=untitled agent"],
     ]);
@@ -323,11 +330,24 @@ describe("reportConversationToken", () => {
     // follows a restore is what puts a named tab's token back.
     const fake = surface(null, { tabLabel: "fix-the-tests" });
     const dir = stateDir();
-    mkdirSync(join(dir, "named-tabs"), { recursive: true });
-    writeFileSync(join(dir, "named-tabs", "tab_1"), "named\n");
-    await reportConversationToken(fake.call, "pane_1", dir);
+    mkdirSync(join(dir, "named-tabs", SESSION_SCOPE), { recursive: true });
+    writeFileSync(claimPath(dir), "named\n");
+    await reportConversationToken(fake.call, "pane_1", dir, SESSION_SCOPE);
     expect(fake.reports).toEqual([
       ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=fix-the-tests"],
+    ]);
+  });
+
+  test("a legacy claim republishes a non-default tab label during migration", async () => {
+    const fake = surface(null, { tabLabel: "keep-this-name" });
+    const dir = stateDir();
+    mkdirSync(join(dir, "named-tabs"), { recursive: true });
+    writeFileSync(join(dir, "named-tabs", "tab_1"), "named\n");
+
+    await reportConversationToken(fake.call, "pane_1", dir, SESSION_SCOPE);
+
+    expect(fake.reports).toEqual([
+      ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=keep-this-name"],
     ]);
   });
 
@@ -335,7 +355,7 @@ describe("reportConversationToken", () => {
     const fake = surface(null, { tabForRead: () => "" });
     let thrown: Error | null = null;
     try {
-      await reportConversationToken(fake.call, "pane_1", stateDir());
+      await reportConversationToken(fake.call, "pane_1", stateDir(), SESSION_SCOPE);
     } catch (error) {
       thrown = error as Error;
     }
@@ -360,7 +380,7 @@ describe("runTabNamer", () => {
     expect(fake.reports).toEqual([
       ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=fix-the-tests"],
     ]);
-    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+    expect(readFileSync(claimPath(dir), "utf8")).toBe("named\n");
   });
 
   test("a failed slug report leaves the name and the claim standing", async () => {
@@ -369,7 +389,7 @@ describe("runTabNamer", () => {
     const code = await namer(fake, dir, async () => ({ kind: "slug", value: "kept" }));
     expect(code).toBe(0);
     expect(fake.renames).toEqual([["tab_1", "kept"]]);
-    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+    expect(readFileSync(claimPath(dir), "utf8")).toBe("named\n");
   });
 
   test("a status transition re-arms a naming attempt", async () => {
@@ -382,7 +402,7 @@ describe("runTabNamer", () => {
     });
     expect(code).toBe(0);
     expect(fake.renames).toEqual([["tab_1", "after-the-dialog"]]);
-    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+    expect(readFileSync(claimPath(dir), "utf8")).toBe("named\n");
   });
 
   test("an already-claimed tab no-ops before inference", async () => {
@@ -397,6 +417,57 @@ describe("runTabNamer", () => {
     expect(await namer(fake, dir, slug)).toBe(0);
     expect(asked).toBe(1);
     expect(fake.renames).toHaveLength(1);
+  });
+
+  test("the same tab id in two herdr sessions is named independently", async () => {
+    const dir = stateDir();
+    const first = surface(CLAUDE_SESSION);
+    const second = surface(CLAUDE_SESSION);
+
+    expect(await namer(first, dir, async () => ({ kind: "slug", value: "first-session" }))).toBe(0);
+    expect(
+      await namer(second, dir, async () => ({ kind: "slug", value: "second-session" }), {
+        sessionScope: "surface-b",
+      }),
+    ).toBe(0);
+
+    expect(first.renames).toEqual([["tab_1", "first-session"]]);
+    expect(second.renames).toEqual([["tab_1", "second-session"]]);
+    expect(readFileSync(claimPath(dir), "utf8")).toBe("named\n");
+    expect(readFileSync(claimPath(dir, "surface-b"), "utf8")).toBe("named\n");
+  });
+
+  test("a legacy unscoped claim cannot suppress naming", async () => {
+    const fake = surface(CLAUDE_SESSION);
+    const dir = stateDir();
+    mkdirSync(join(dir, "named-tabs"), { recursive: true });
+    writeFileSync(join(dir, "named-tabs", "tab_1"), "named\n");
+
+    expect(await namer(fake, dir, async () => ({ kind: "slug", value: "fresh-scope" }))).toBe(0);
+    expect(fake.renames).toEqual([["tab_1", "fresh-scope"]]);
+    expect(readFileSync(claimPath(dir), "utf8")).toBe("named\n");
+  });
+
+  test("a legacy claim preserves a tab that already has a Name", async () => {
+    const fake = surface(CLAUDE_SESSION, { tabLabel: "keep-this-name" });
+    const dir = stateDir();
+    mkdirSync(join(dir, "named-tabs"), { recursive: true });
+    writeFileSync(join(dir, "named-tabs", "tab_1"), "named\n");
+    let asked = 0;
+
+    expect(
+      await namer(fake, dir, async () => {
+        asked += 1;
+        return { kind: "slug", value: "replacement" };
+      }),
+    ).toBe(0);
+
+    expect(asked).toBe(0);
+    expect(fake.renames).toHaveLength(0);
+    expect(fake.reports).toEqual([
+      ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=keep-this-name"],
+    ]);
+    expect(readFileSync(claimPath(dir), "utf8")).toBe("named\n");
   });
 
   test("waits out a pending transcript, then names", async () => {
@@ -415,7 +486,7 @@ describe("runTabNamer", () => {
     const dir = stateDir();
     const code = await namer(fake, dir, async () => ({ kind: "failed", message: "boom" }));
     expect(code).toBe(1);
-    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(false);
+    expect(existsSync(claimPath(dir))).toBe(false);
     expect(fake.renames).toHaveLength(0);
   });
 
@@ -426,7 +497,7 @@ describe("runTabNamer", () => {
       promptTimeoutMs: 0,
     });
     expect(code).toBe(0);
-    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(false);
+    expect(existsSync(claimPath(dir))).toBe(false);
   });
 
   test("an unsupported agent and a released detection both no-op", async () => {
@@ -488,7 +559,7 @@ describe("runTabNamer", () => {
       ["claude", "abc-123"],
     ]);
     expect(fake.renames).toEqual([["tab_1", "debug-escaping"]]);
-    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+    expect(readFileSync(claimPath(dir), "utf8")).toBe("named\n");
   });
 
   test("an adopted conversation gets a fresh prompt window", async () => {
@@ -520,14 +591,14 @@ describe("runTabNamer", () => {
   test("an orphaned pending claim is taken over", async () => {
     const fake = surface(CLAUDE_SESSION);
     const dir = stateDir();
-    mkdirSync(join(dir, "named-tabs"), { recursive: true });
-    writeFileSync(join(dir, "named-tabs", "tab_1"), "pending 999999\n");
+    mkdirSync(join(dir, "named-tabs", SESSION_SCOPE), { recursive: true });
+    writeFileSync(claimPath(dir), "pending 999999\n");
     const code = await namer(fake, dir, async () => ({ kind: "slug", value: "rescued" }), {
       pidAlive: () => false,
     });
     expect(code).toBe(0);
     expect(fake.renames).toEqual([["tab_1", "rescued"]]);
-    expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe("named\n");
+    expect(readFileSync(claimPath(dir), "utf8")).toBe("named\n");
   });
 
   test("live pending, named, and legacy claims all no-op", async () => {
@@ -537,10 +608,10 @@ describe("runTabNamer", () => {
     for (const content of ["pending 4242\n", "named\n", "2026-08-17T03:34:41.794Z\n"]) {
       const fake = surface(CLAUDE_SESSION);
       const dir = stateDir();
-      mkdirSync(join(dir, "named-tabs"), { recursive: true });
-      writeFileSync(join(dir, "named-tabs", "tab_1"), content);
+      mkdirSync(join(dir, "named-tabs", SESSION_SCOPE), { recursive: true });
+      writeFileSync(claimPath(dir), content);
       expect(await namer(fake, dir, never, { pidAlive: () => true })).toBe(0);
-      expect(readFileSync(join(dir, "named-tabs", "tab_1"), "utf8")).toBe(content);
+      expect(readFileSync(claimPath(dir), "utf8")).toBe(content);
       expect(fake.renames).toHaveLength(0);
     }
   });
@@ -548,7 +619,7 @@ describe("runTabNamer", () => {
   test("a superseded namer's failure leaves its successor's claim", async () => {
     const fake = surface(CLAUDE_SESSION);
     const dir = stateDir();
-    const claim = join(dir, "named-tabs", "tab_1");
+    const claim = claimPath(dir);
     const code = await namer(fake, dir, async () => {
       // Another namer took the claim over while this one was polling.
       writeFileSync(claim, "pending 777\n");
@@ -565,7 +636,7 @@ describe("runTabNamer", () => {
     const dir = stateDir();
     const code = await namer(fake, dir, async () => ({ kind: "pending" }));
     expect(code).toBe(0);
-    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(false);
+    expect(existsSync(claimPath(dir))).toBe(false);
     expect(fake.renames).toHaveLength(0);
   });
 
@@ -576,7 +647,7 @@ describe("runTabNamer", () => {
     const dir = stateDir();
     const code = await namer(fake, dir, async () => ({ kind: "pending" }));
     expect(code).toBe(0);
-    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(false);
+    expect(existsSync(claimPath(dir))).toBe(false);
     expect(fake.renames).toHaveLength(0);
   });
 
@@ -585,6 +656,17 @@ describe("runTabNamer", () => {
     const dir = stateDir();
     const code = await namer(fake, dir, async () => ({ kind: "pending" }));
     expect(code).toBe(0);
-    expect(existsSync(join(dir, "named-tabs", "tab_1"))).toBe(false);
+    expect(existsSync(claimPath(dir))).toBe(false);
+  });
+});
+
+describe("sessionClaimScope", () => {
+  test("is stable per socket and distinct between sessions", () => {
+    expect(sessionClaimScope("/state/sessions/jobs/herdr.sock")).toBe(
+      sessionClaimScope("/state/sessions/jobs/herdr.sock"),
+    );
+    expect(sessionClaimScope("/state/sessions/jobs/herdr.sock")).not.toBe(
+      sessionClaimScope("/state/sessions/default/herdr.sock"),
+    );
   });
 });

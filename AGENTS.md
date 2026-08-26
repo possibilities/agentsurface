@@ -147,11 +147,13 @@ re-implements neither side.
   falling back to the workspace label off any repository), and each hook
   run is one
   bounded naming attempt: poll the pane for its agent session, claim the
-  tab in the plugin's state directory (a `pending <pid>` state file,
-  rewritten to `named` after the rename; a dead claimant's pending claim
-  is taken over), and poll `conversation slug` while the transcript has
-  no prompt — re-reading the pane's live session each round, so a crashed
-  agent's replacement becomes the name source — then rename the tab. The
+  tab in the plugin's state directory, scoped by the Herdr session socket
+  because public tab IDs repeat across named sessions (a `pending <pid>`
+  state file, rewritten to `named` after the rename; a dead claimant's
+  pending claim is taken over; an old unscoped claim migrates only when its
+  tab already has a nonnumeric Name), and poll `conversation slug` while the
+  transcript has no prompt — re-reading the pane's live session each round,
+  so a crashed agent's replacement becomes the name source — then rename the tab. The
   windows cover machine lag only; a start stalled at a trust dialog or an
   agent idling unprompted expires the attempt, and the status transition
   that ends the stall re-arms a fresh one, however much later it comes.

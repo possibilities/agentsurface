@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HARNESS_NAMES, type HarnessName } from "./conversation/resolve.ts";
@@ -27,7 +28,9 @@ import type { Environ } from "./paths.ts";
  * agent that crashes and is replaced inside the window hands naming to its
  * successor instead of orphaning the tab on a dead ref.
  *
- * "Named once" is a claim file per tab in the plugin's state directory —
+ * "Named once" is a claim file per session and tab in the plugin's state
+ * directory — public tab ids repeat across named herdr sessions, so the
+ * session socket's stable hash scopes each claim —
  * `pending <pid>` while a namer polls, `named` once a rename has landed,
  * and anything else (the legacy timestamp format, a hand-written marker)
  * terminal. The exclusive create elects one owner among concurrent
@@ -185,6 +188,7 @@ export async function reportConversationToken(
   call: HerdrCall,
   paneId: string,
   stateDir: string,
+  sessionScope: string,
 ): Promise<void> {
   const paneResult = (await invoke(call, ["pane", "get", paneId])) as {
     pane?: { tab_id?: unknown };
@@ -194,16 +198,11 @@ export async function reportConversationToken(
     throw new HerdrError("herdr's pane response named no tab");
   }
   let value = UNTITLED_CONVERSATION;
-  if (readClaim(claimPath(stateDir, tabId)).state === "named") {
-    const tabResult = (await invoke(call, ["tab", "get", tabId])) as {
-      tab?: { label?: unknown };
-    } | null;
-    const label = tabResult?.tab?.label;
-    if (typeof label !== "string" || label === "") {
-      throw new HerdrError("herdr's tab response named no label");
-    }
-    value = label;
-  }
+  const scoped = readClaim(claimPath(stateDir, sessionScope, tabId));
+  const legacyLabel =
+    scoped.state === "absent" ? await legacyNamedLabel(call, stateDir, tabId) : null;
+  if (scoped.state === "named" || legacyLabel !== null)
+    value = legacyLabel ?? (await tabLabel(call, tabId));
   await reportConversationValue(call, paneId, value);
 }
 
@@ -268,8 +267,46 @@ export function createSlugAttempt(
 
 type Claim = { state: "pending"; pid: number } | { state: "named" } | { state: "absent" };
 
-function claimPath(stateDir: string, tabId: string): string {
+function claimDirectory(stateDir: string, sessionScope: string): string {
+  return join(stateDir, "named-tabs", sessionScope);
+}
+
+function claimPath(stateDir: string, sessionScope: string, tabId: string): string {
+  return join(claimDirectory(stateDir, sessionScope), tabId);
+}
+
+function legacyClaimPath(stateDir: string, tabId: string): string {
   return join(stateDir, "named-tabs", tabId);
+}
+
+/** Herdr's socket path is stable for a named session and distinct between
+ * sessions. Hashing keeps machine-identifying paths out of the state shape. */
+export function sessionClaimScope(socketPath: string): string {
+  return createHash("sha256").update(socketPath).digest("hex").slice(0, 16);
+}
+
+async function tabLabel(call: HerdrCall, tabId: string): Promise<string> {
+  const tabResult = (await invoke(call, ["tab", "get", tabId])) as {
+    tab?: { label?: unknown };
+  } | null;
+  const label = tabResult?.tab?.label;
+  if (typeof label !== "string" || label === "") {
+    throw new HerdrError("herdr's tab response named no label");
+  }
+  return label;
+}
+
+/** An unscoped claim predates session scoping. Preserve it only when the
+ * tab itself proves it already has a non-default Name; a numeric label is
+ * Herdr's unnamed fallback and may belong to a different session's claim. */
+async function legacyNamedLabel(
+  call: HerdrCall,
+  stateDir: string,
+  tabId: string,
+): Promise<string | null> {
+  if (readClaim(legacyClaimPath(stateDir, tabId)).state !== "named") return null;
+  const label = await tabLabel(call, tabId);
+  return /^\d+$/.test(label) ? null : label;
 }
 
 function readClaim(path: string): Claim {
@@ -322,6 +359,9 @@ function processAlive(pid: number): boolean {
 export interface TabNamerOptions {
   call: HerdrCall;
   stateDir: string;
+  /** Stable identity of the herdr session. Public tab ids are unique only
+   * inside one session and therefore cannot key machine-global claims. */
+  sessionScope: string;
   eventJson: string;
   slug: (harness: HarnessName, ref: string) => Promise<SlugOutcome>;
   sleep?: (ms: number) => Promise<void>;
@@ -379,8 +419,27 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
     await sleep(sessionPollMs);
   }
 
-  const claim = claimPath(options.stateDir, session.tabId);
-  mkdirSync(join(options.stateDir, "named-tabs"), { recursive: true });
+  const claim = claimPath(options.stateDir, options.sessionScope, session.tabId);
+  mkdirSync(claimDirectory(options.stateDir, options.sessionScope), { recursive: true });
+  const existingLabel =
+    readClaim(claim).state === "absent"
+      ? await legacyNamedLabel(options.call, options.stateDir, session.tabId)
+      : null;
+  if (existingLabel !== null) {
+    try {
+      writeFileSync(claim, "named\n", { flag: "wx" });
+    } catch {
+      // A concurrent hook won the scoped claim. Its state governs below.
+    }
+    if (readClaim(claim).state === "named") {
+      try {
+        await reportConversationValue(options.call, event.paneId, existingLabel);
+      } catch (error) {
+        console.error(`name-tab: conversation token failed: ${(error as Error).message}`);
+      }
+      return 0;
+    }
+  }
   if (!acquireClaim(claim, pid, pidAlive)) return 0;
 
   let promptDeadline = now() + promptTimeoutMs;
@@ -462,10 +521,18 @@ async function heldTokens(
 export async function nameTabFromEnvironment(env: Environ, home: string): Promise<number> {
   const stateDir = env["HERDR_PLUGIN_STATE_DIR"];
   const eventJson = env["HERDR_PLUGIN_EVENT_JSON"];
-  if (stateDir === undefined || stateDir === "" || eventJson === undefined) {
+  const socketPath = env["HERDR_SOCKET_PATH"];
+  if (
+    stateDir === undefined ||
+    stateDir === "" ||
+    eventJson === undefined ||
+    socketPath === undefined ||
+    socketPath === ""
+  ) {
     console.error("name-tab runs as a herdr plugin event hook; herdr provides its environment");
     return 2;
   }
+  const sessionScope = sessionClaimScope(socketPath);
   const call = createHerdrCall(env);
   const event = parsePaneEvent(eventJson);
   // The tokens ride detection only: neither a pane's project nor its tab's
@@ -500,7 +567,7 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
       },
     );
     try {
-      await reportConversationToken(call, detected.paneId, stateDir);
+      await reportConversationToken(call, detected.paneId, stateDir, sessionScope);
       outcomes["conversation"] = "ok";
     } catch (error) {
       outcomes["conversation"] = (error as Error).message;
@@ -530,6 +597,7 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
   const code = await runTabNamer({
     call,
     stateDir,
+    sessionScope,
     eventJson,
     slug: createSlugAttempt(env, home),
   });
