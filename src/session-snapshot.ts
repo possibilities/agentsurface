@@ -780,10 +780,10 @@ async function restoreMissingSession(
     }
   }
 
-  let agentsStarted = 0;
   let agentsSkipped = 0;
   const names = new Set<string>();
   const resumed = new Set<string>();
+  const launches: Array<Promise<unknown>> = [];
   for (const item of pending) {
     const args = resumeArgs(item.agent);
     const session = item.agent.session;
@@ -800,15 +800,17 @@ async function restoreMissingSession(
     const preferred = item.agent.name;
     const name = preferred !== null && !names.has(preferred) ? preferred : nextAgentName(names);
     names.add(name);
-    await startAgentWhenReady(call, {
-      name,
-      kind: item.agent.harness,
-      paneId: item.paneId,
-      agentArgs: args,
-    });
-    agentsStarted += 1;
+    launches.push(
+      startAgentWhenReady(call, {
+        name,
+        kind: item.agent.harness,
+        paneId: item.paneId,
+        agentArgs: args,
+      }),
+    );
   }
-  return { agentsStarted, agentsSkipped };
+  await Promise.all(launches);
+  return { agentsStarted: launches.length, agentsSkipped };
 }
 
 async function waitUntilRunning(

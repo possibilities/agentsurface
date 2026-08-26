@@ -442,6 +442,56 @@ describe("session snapshot resume", () => {
     }
   });
 
+  test("starts independent conversation resumes concurrently", async () => {
+    const saved = snapshot();
+    const panes = saved.session.workspaces[0]?.tabs[0]?.panes;
+    if (panes === undefined) throw new Error("fixture");
+    panes.push({
+      cwd: "/code/project",
+      label: null,
+      agent: {
+        name: "second-agent",
+        harness: "codex",
+        session: {
+          source: "herdr:codex",
+          agent: "codex",
+          kind: "id",
+          value: "session-456",
+        },
+      },
+    });
+
+    const startedPanes: string[] = [];
+    let releaseStarts: () => void = () => {};
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseStarts = resolve;
+    });
+    const service = fakeServices({
+      call: async (_session, args) => {
+        const command = args.slice(0, 2).join(" ");
+        if (command === "workspace create") {
+          return {
+            result: {
+              workspace: { workspace_id: "w9" },
+              tab: { tab_id: "w9:t1" },
+              root_pane: { pane_id: "w9:p1" },
+            },
+          };
+        }
+        if (command === "pane split") return { result: { pane: { pane_id: "w9:p2" } } };
+        if (command === "agent start") {
+          startedPanes.push(args[args.indexOf("--pane") + 1] ?? "missing");
+          if (startedPanes.length === 2) releaseStarts();
+          await bothStarted;
+        }
+        return { result: {} };
+      },
+    });
+
+    expect(await restoreSessionSnapshot(saved, service)).toMatchObject({ agents_started: 2 });
+    expect(startedPanes).toEqual(["w9:p1", "w9:p2"]);
+  });
+
   test("can restore into an explicitly overridden session name", async () => {
     const service = fakeServices({
       call: async (_session, args) => {
