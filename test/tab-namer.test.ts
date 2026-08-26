@@ -57,6 +57,7 @@ function surface(
     tabForRead?: (read: number) => string;
     errorAfterReads?: number;
     tabLabel?: string;
+    conversationToken?: string;
     reportError?: boolean;
   } = {},
 ): FakeSurface {
@@ -87,6 +88,9 @@ function surface(
           pane: {
             tab_id: options.tabForRead?.(fake.paneReads) ?? "tab_1",
             agent_session: ready ? value : null,
+            ...(options.conversationToken === undefined
+              ? {}
+              : { tokens: { conversation: options.conversationToken } }),
           },
         },
       };
@@ -322,6 +326,20 @@ describe("reportConversationToken", () => {
     await reportConversationToken(fake.call, "pane_1", dir, SESSION_SCOPE);
     expect(fake.reports).toEqual([
       ["pane_1", "--source", "agentsurface:sidebar", "--token", "conversation=untitled agent"],
+    ]);
+  });
+
+  test("a restored conversation token survives a delayed detection hook", async () => {
+    const fake = surface(null, { conversationToken: "restored-conversation" });
+    await reportConversationToken(fake.call, "pane_1", stateDir(), SESSION_SCOPE);
+    expect(fake.reports).toEqual([
+      [
+        "pane_1",
+        "--source",
+        "agentsurface:sidebar",
+        "--token",
+        "conversation=restored-conversation",
+      ],
     ]);
   });
 

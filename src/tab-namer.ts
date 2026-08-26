@@ -191,13 +191,16 @@ export async function reportConversationToken(
   sessionScope: string,
 ): Promise<void> {
   const paneResult = (await invoke(call, ["pane", "get", paneId])) as {
-    pane?: { tab_id?: unknown };
+    pane?: { tab_id?: unknown; tokens?: unknown };
   } | null;
-  const tabId = paneResult?.pane?.tab_id;
+  const pane = paneResult?.pane;
+  const tabId = pane?.tab_id;
   if (typeof tabId !== "string" || tabId === "") {
     throw new HerdrError("herdr's pane response named no tab");
   }
-  let value = UNTITLED_CONVERSATION;
+  const tokens = pane?.tokens as Record<string, unknown> | null | undefined;
+  const restored = tokens?.["conversation"];
+  let value = typeof restored === "string" && restored !== "" ? restored : UNTITLED_CONVERSATION;
   const scoped = readClaim(claimPath(stateDir, sessionScope, tabId));
   const legacyLabel =
     scoped.state === "absent" ? await legacyNamedLabel(call, stateDir, tabId) : null;
