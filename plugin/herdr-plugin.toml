@@ -61,18 +61,6 @@ width = "80%"
 height = "80%"
 command = ["agentvoice", "remote"]
 
-# The browser pane is a split, not a popup: agentweb docks the real Chrome
-# window over this pane's rectangle, so the pane must be a tiled surface with
-# a stable place on screen. Agents open it beside themselves before requesting
-# attention (`herdr plugin pane open --plugin agentsurface --entrypoint
-# browser --placement split --no-focus`); the operator solves the wall in the
-# docked window and presses r in the pane to hand the browser back.
-[[panes]]
-id = "browser"
-title = "Agentweb"
-placement = "split"
-command = ["agentsurface", "browser"]
-
 # Destructive topology keybindings open these minimal confirmation popups. All
 # three reuse AgentSurface's generic exact-argv confirmation; the internal
 # close-active bridge reads the pane entrypoint's captured plugin context and
