@@ -417,6 +417,15 @@ describe("session snapshot resume", () => {
       "--x-resume",
       "session-123",
     ]);
+    expect(service.calls.map((call) => call.args)).toContainEqual([
+      "pane",
+      "report-metadata",
+      "w1:p1",
+      "--source",
+      "agentsurface:sidebar",
+      "--token",
+      "conversation=fix-the-thing",
+    ]);
   });
 
   test("a stopped existing session starts and then resumes its saved agents", async () => {

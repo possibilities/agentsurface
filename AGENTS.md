@@ -126,9 +126,9 @@ re-implements neither side.
   overridden, and is deliberately non-replacing: a target with running agents
   is untouched; an agent-free existing target keeps its persisted topology and
   resumes saved agents into matching panes, recreating a missing saved
-  agent-bearing workspace beside it; a missing target is fully rebuilt. A
-  missing dirty worktree is refused because metadata cannot carry uncommitted
-  changes.
+  agent-bearing workspace beside it and republishing each saved tab label as
+  the pane's conversation sidebar token; a missing target is fully rebuilt. A
+  missing dirty worktree is refused because metadata cannot carry uncommitted changes.
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
   installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
   entrypoint runs `agentsurface host -- agentlaunch --x-surface` in a

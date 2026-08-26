@@ -14,6 +14,7 @@ import {
   startAgentWhenReady,
 } from "./herdr.ts";
 import { type Environ, expandTilde, stateDirectory } from "./paths.ts";
+import { reportConversationValue } from "./tab-namer.ts";
 
 const safeText = z.string().refine(
   (value) =>
@@ -730,6 +731,7 @@ function resumeArgs(agent: Exclude<SavedAgent, null>): string[] | null {
 interface PendingAgent {
   paneId: string;
   agent: Exclude<SavedAgent, null>;
+  conversation: string;
 }
 
 function topologyMismatch(targetName: string, detail: string): CliError {
@@ -777,7 +779,7 @@ async function restoreSavedWorkspace(
         paneId = splitPaneId;
       }
       if (pane.label !== null) await invoke(call, ["pane", "rename", paneId, pane.label]);
-      if (pane.agent !== null) pending.push({ paneId, agent: pane.agent });
+      if (pane.agent !== null) pending.push({ paneId, agent: pane.agent, conversation: tab.label });
     }
     void tabId;
   }
@@ -877,7 +879,7 @@ async function pendingAgentsInExistingSession(
             `tab ${JSON.stringify(savedTab.label)} pane ${paneIndex + 1} has no id`,
           );
         }
-        pending.push({ paneId, agent: savedPane.agent });
+        pending.push({ paneId, agent: savedPane.agent, conversation: savedTab.label });
       }
     }
   }
@@ -891,7 +893,7 @@ async function startPendingAgents(
   let agentsSkipped = 0;
   const names = new Set<string>();
   const resumed = new Set<string>();
-  const launches: Array<Promise<unknown>> = [];
+  const launches: Array<{ item: PendingAgent; start: Promise<unknown> }> = [];
   for (const item of pending) {
     const args = resumeArgs(item.agent);
     const session = item.agent.session;
@@ -908,16 +910,28 @@ async function startPendingAgents(
     const preferred = item.agent.name;
     const name = preferred !== null && !names.has(preferred) ? preferred : nextAgentName(names);
     names.add(name);
-    launches.push(
-      startAgentWhenReady(call, {
+    launches.push({
+      item,
+      start: startAgentWhenReady(call, {
         name,
         kind: item.agent.harness,
         paneId: item.paneId,
         agentArgs: args,
       }),
-    );
+    });
   }
-  await Promise.all(launches);
+  await Promise.all(launches.map((launch) => launch.start));
+  await Promise.all(
+    launches.map(async ({ item }) => {
+      try {
+        await reportConversationValue(call, item.paneId, item.conversation);
+      } catch {
+        // The harness is already running, so a cosmetic metadata failure
+        // cannot turn the successful resume into a reported launch failure.
+        // The detection hook remains the retry path.
+      }
+    }),
+  );
   return { agentsStarted: launches.length, agentsSkipped };
 }
 

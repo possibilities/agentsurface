@@ -162,7 +162,7 @@ async function checkoutForCwd(call: HerdrCall, cwd: string): Promise<string | nu
   return `${repoName} ${BRANCH_MARKER} ${displayBranch}`;
 }
 
-async function reportConversationValue(
+export async function reportConversationValue(
   call: HerdrCall,
   paneId: string,
   value: string,

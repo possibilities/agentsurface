@@ -141,7 +141,8 @@ deliberately nondestructive and uses the saved session name unless `--session`
 overrides it. A target with running agents is a no-op. An agent-free existing
 target—including the always-present `default` session—keeps Herdr's persisted
 topology, resumes saved agents into matching panes, and recreates a missing
-saved agent workspace beside it. Topology drift is ignored outside
+saved agent workspace beside it. After launch it republishes the saved tab
+label as the pane's conversation sidebar token. Topology drift is ignored outside
 agent-bearing panes and refused within an existing match before any agent
 starts. AgentSurface fully reconstructs topology when the target session is
 wholly absent. Existing linked worktrees are reopened; a missing clean worktree
