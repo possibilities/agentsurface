@@ -28,12 +28,15 @@ import type { Environ } from "./paths.ts";
  * agent that crashes and is replaced inside the window hands naming to its
  * successor instead of orphaning the tab on a dead ref.
  *
- * "Named once" is a claim file per session and tab in the plugin's state
- * directory — public tab ids repeat across named herdr sessions, so the
- * session socket's stable hash scopes each claim —
- * `pending <pid>` while a namer polls, `named` once a rename has landed,
- * and anything else (the legacy timestamp format, a hand-written marker)
- * terminal. The exclusive create elects one owner among concurrent
+ * "Named once" is a claim file per herdr session and tab in the plugin's
+ * state directory — public tab ids repeat across named herdr sessions, so
+ * the session socket's stable hash scopes each claim. A completed claim also
+ * carries the harness conversation's hash: a herdr server can later reuse a
+ * restored numeric tab id for a new conversation, which must get a new name.
+ * `pending <pid>` elects one polling namer and `named <conversation-hash>`
+ * records the conversation whose rename landed. Older terminal claim formats
+ * migrate only when the tab still carries a nonnumeric Name. The exclusive
+ * create elects one owner among concurrent
  * attempts — status transitions fire on every turn boundary, so a named
  * tab's claim is also what makes those firings cheap; a pending claim
  * whose namer is dead was orphaned (killed mid-poll, a reboot) and is
@@ -191,18 +194,23 @@ export async function reportConversationToken(
   sessionScope: string,
 ): Promise<void> {
   const paneResult = (await invoke(call, ["pane", "get", paneId])) as {
-    pane?: { tab_id?: unknown };
+    pane?: {
+      tab_id?: unknown;
+      agent_session?: { agent?: unknown; value?: unknown } | null;
+    };
   } | null;
-  const tabId = paneResult?.pane?.tab_id;
+  const pane = paneResult?.pane;
+  const tabId = pane?.tab_id;
   if (typeof tabId !== "string" || tabId === "") {
     throw new HerdrError("herdr's pane response named no tab");
   }
   let value = UNTITLED_CONVERSATION;
-  const scoped = readClaim(claimPath(stateDir, sessionScope, tabId));
-  const legacyLabel =
-    scoped.state === "absent" ? await legacyNamedLabel(call, stateDir, tabId) : null;
-  if (scoped.state === "named" || legacyLabel !== null)
-    value = legacyLabel ?? (await tabLabel(call, tabId));
+  const session = parsePaneSession(pane);
+  const namedLabel =
+    session === null || session === "unsupported"
+      ? await legacyLabelWithoutSession(call, stateDir, sessionScope, tabId)
+      : await namedLabelForSession(call, stateDir, sessionScope, session);
+  if (namedLabel !== null) value = namedLabel;
   await reportConversationValue(call, paneId, value);
 }
 
@@ -212,6 +220,26 @@ export interface PaneSession {
   /** The session reference herdr reported — an id or a literal transcript
    * path; `conversation slug` accepts both. */
   ref: string;
+}
+
+function parsePaneSession(
+  pane:
+    | {
+        tab_id?: unknown;
+        agent_session?: { agent?: unknown; value?: unknown } | null;
+      }
+    | undefined,
+): PaneSession | "unsupported" | null {
+  const session = pane?.agent_session;
+  if (session === undefined || session === null) return null;
+  const agent = session.agent;
+  const ref = session.value;
+  const tabId = pane?.tab_id;
+  if (typeof agent !== "string" || typeof ref !== "string" || typeof tabId !== "string") {
+    return null;
+  }
+  if (!(HARNESS_NAMES as readonly string[]).includes(agent)) return "unsupported";
+  return { tabId, harness: agent as HarnessName, ref };
 }
 
 /** One pane read: null while the pane has no reportable agent session. A
@@ -226,17 +254,7 @@ async function paneSession(
       agent_session?: { agent?: unknown; value?: unknown } | null;
     };
   } | null;
-  const pane = result?.pane;
-  const session = pane?.agent_session;
-  if (session === undefined || session === null) return null;
-  const agent = session.agent;
-  const ref = session.value;
-  const tabId = pane?.tab_id;
-  if (typeof agent !== "string" || typeof ref !== "string" || typeof tabId !== "string") {
-    return null;
-  }
-  if (!(HARNESS_NAMES as readonly string[]).includes(agent)) return "unsupported";
-  return { tabId, harness: agent as HarnessName, ref };
+  return parsePaneSession(result?.pane);
 }
 
 export type SlugOutcome =
@@ -265,7 +283,10 @@ export function createSlugAttempt(
   };
 }
 
-type Claim = { state: "pending"; pid: number } | { state: "named" } | { state: "absent" };
+type Claim =
+  | { state: "pending"; pid: number }
+  | { state: "named"; conversation: string | null }
+  | { state: "absent" };
 
 function claimDirectory(stateDir: string, sessionScope: string): string {
   return join(stateDir, "named-tabs", sessionScope);
@@ -285,6 +306,18 @@ export function sessionClaimScope(socketPath: string): string {
   return createHash("sha256").update(socketPath).digest("hex").slice(0, 16);
 }
 
+function conversationClaim(session: PaneSession): string {
+  return createHash("sha256")
+    .update(session.harness)
+    .update("\0")
+    .update(session.ref)
+    .digest("hex");
+}
+
+function namedClaimContent(session: PaneSession): string {
+  return `named ${conversationClaim(session)}\n`;
+}
+
 async function tabLabel(call: HerdrCall, tabId: string): Promise<string> {
   const tabResult = (await invoke(call, ["tab", "get", tabId])) as {
     tab?: { label?: unknown };
@@ -296,17 +329,66 @@ async function tabLabel(call: HerdrCall, tabId: string): Promise<string> {
   return label;
 }
 
-/** An unscoped claim predates session scoping. Preserve it only when the
- * tab itself proves it already has a non-default Name; a numeric label is
- * Herdr's unnamed fallback and may belong to a different session's claim. */
-async function legacyNamedLabel(
+function isDefaultTabLabel(label: string): boolean {
+  return /^\d+$/.test(label);
+}
+
+/** A claim with no conversation identity predates this claim format. Bind it
+ * to the live conversation only when the tab itself proves a name landed.
+ * Numeric labels are herdr's unnamed fallback and can belong to a later
+ * server incarnation that reused the public tab id. */
+async function namedLabelForSession(
   call: HerdrCall,
   stateDir: string,
+  sessionScope: string,
+  session: PaneSession,
+): Promise<string | null> {
+  const path = claimPath(stateDir, sessionScope, session.tabId);
+  const expected = conversationClaim(session);
+  const scoped = readClaim(path);
+  if (scoped.state === "pending") return null;
+  if (scoped.state === "named" && scoped.conversation !== null) {
+    if (scoped.conversation !== expected) return null;
+    const label = await tabLabel(call, session.tabId);
+    return isDefaultTabLabel(label) ? null : label;
+  }
+
+  const hasLegacyScoped = scoped.state === "named";
+  const hasLegacyUnscoped =
+    scoped.state === "absent" &&
+    readClaim(legacyClaimPath(stateDir, session.tabId)).state === "named";
+  if (!hasLegacyScoped && !hasLegacyUnscoped) return null;
+
+  const label = await tabLabel(call, session.tabId);
+  if (isDefaultTabLabel(label)) return null;
+  if (hasLegacyScoped) {
+    if (readClaim(path).state === "named") writeFileSync(path, namedClaimContent(session));
+  } else {
+    try {
+      writeFileSync(path, namedClaimContent(session), { flag: "wx" });
+    } catch {
+      // A concurrent hook owns the scoped claim now; its state governs.
+    }
+  }
+  const migrated = readClaim(path);
+  return migrated.state === "named" && migrated.conversation === expected ? label : null;
+}
+
+/** Detection can precede herdr's agent-session report by a few milliseconds.
+ * During that gap preserve only a visible nonnumeric label backed by any
+ * completed claim; the namer will bind a legacy claim after the session is
+ * reportable. */
+async function legacyLabelWithoutSession(
+  call: HerdrCall,
+  stateDir: string,
+  sessionScope: string,
   tabId: string,
 ): Promise<string | null> {
-  if (readClaim(legacyClaimPath(stateDir, tabId)).state !== "named") return null;
+  const scoped = readClaim(claimPath(stateDir, sessionScope, tabId));
+  const legacy = readClaim(legacyClaimPath(stateDir, tabId));
+  if (scoped.state !== "named" && legacy.state !== "named") return null;
   const label = await tabLabel(call, tabId);
-  return /^\d+$/.test(label) ? null : label;
+  return isDefaultTabLabel(label) ? null : label;
 }
 
 function readClaim(path: string): Claim {
@@ -317,8 +399,9 @@ function readClaim(path: string): Claim {
     return { state: "absent" };
   }
   const pending = /^pending (\d+)$/.exec(content.trim());
-  if (pending === null) return { state: "named" };
-  return { state: "pending", pid: Number(pending[1]) };
+  if (pending !== null) return { state: "pending", pid: Number(pending[1]) };
+  const named = /^named ([0-9a-f]{64})$/.exec(content.trim());
+  return { state: "named", conversation: named?.[1] ?? null };
 }
 
 function acquireClaim(path: string, pid: number, pidAlive: (pid: number) => boolean): boolean {
@@ -421,25 +504,23 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
 
   const claim = claimPath(options.stateDir, options.sessionScope, session.tabId);
   mkdirSync(claimDirectory(options.stateDir, options.sessionScope), { recursive: true });
-  const existingLabel =
-    readClaim(claim).state === "absent"
-      ? await legacyNamedLabel(options.call, options.stateDir, session.tabId)
-      : null;
+  const existingLabel = await namedLabelForSession(
+    options.call,
+    options.stateDir,
+    options.sessionScope,
+    session,
+  );
   if (existingLabel !== null) {
     try {
-      writeFileSync(claim, "named\n", { flag: "wx" });
-    } catch {
-      // A concurrent hook won the scoped claim. Its state governs below.
+      await reportConversationValue(options.call, event.paneId, existingLabel);
+    } catch (error) {
+      console.error(`name-tab: conversation token failed: ${(error as Error).message}`);
     }
-    if (readClaim(claim).state === "named") {
-      try {
-        await reportConversationValue(options.call, event.paneId, existingLabel);
-      } catch (error) {
-        console.error(`name-tab: conversation token failed: ${(error as Error).message}`);
-      }
-      return 0;
-    }
+    return 0;
   }
+  // A completed claim for another conversation, or a legacy claim backed by
+  // herdr's numeric fallback, belongs to an earlier occupant/incarnation.
+  if (readClaim(claim).state === "named") rmSync(claim, { force: true });
   if (!acquireClaim(claim, pid, pidAlive)) return 0;
 
   let promptDeadline = now() + promptTimeoutMs;
@@ -453,7 +534,7 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
         console.error(`name-tab: tab rename failed: ${(error as Error).message}`);
         return 1;
       }
-      writeFileSync(claim, "named\n");
+      writeFileSync(claim, namedClaimContent(session));
       try {
         await reportConversationValue(options.call, event.paneId, outcome.value);
       } catch (error) {
