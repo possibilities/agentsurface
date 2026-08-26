@@ -394,9 +394,52 @@ describe("session snapshot resume", () => {
       "--timeout",
       "120000",
       "--",
-      "resume",
+      "--x-resume",
       "session-123",
     ]);
+  });
+
+  test("fleet harnesses resume through AgentLaunch rather than native open argv", async () => {
+    for (const harness of ["claude", "codex", "pi"] as const) {
+      const saved = snapshot();
+      const agent = saved.session.workspaces[0]?.tabs[0]?.panes[0]?.agent;
+      if (agent === null || agent === undefined || agent.session === null)
+        throw new Error("fixture");
+      agent.harness = harness;
+      agent.session.source = `herdr:${harness}`;
+      agent.session.agent = harness;
+      const service = fakeServices({
+        call: async (_session, args) => {
+          if (args[0] === "workspace" && args[1] === "create") {
+            return {
+              result: {
+                workspace: { workspace_id: "w9" },
+                tab: { tab_id: "w9:t1" },
+                root_pane: { pane_id: "w9:p1" },
+              },
+            };
+          }
+          return { result: {} };
+        },
+      });
+
+      await restoreSessionSnapshot(saved, service);
+
+      expect(service.calls.map((call) => call.args)).toContainEqual([
+        "agent",
+        "start",
+        "saved-agent",
+        "--kind",
+        harness,
+        "--pane",
+        "w9:p1",
+        "--timeout",
+        "120000",
+        "--",
+        "--x-resume",
+        "session-123",
+      ]);
+    }
   });
 
   test("can restore into an explicitly overridden session name", async () => {

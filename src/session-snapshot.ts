@@ -694,7 +694,13 @@ function resumeArgs(agent: Exclude<SavedAgent, null>): string[] | null {
   if (session.agent !== agent.harness) return null;
   const value = session.value;
   switch (`${session.source}\0${agent.harness}`) {
+    // Bare fleet harness commands resolve through AgentLaunch's shims. Its
+    // extension flag enters the resume route before native argv is composed,
+    // preserving the conversation's cwd, model-aware balancing, and policy.
     case "herdr:claude\0claude":
+    case "herdr:codex\0codex":
+    case "herdr:pi\0pi":
+      return ["--x-resume", value];
     case "herdr:devin\0devin":
     case "herdr:droid\0droid":
     case "herdr:hermes\0hermes":
@@ -702,12 +708,9 @@ function resumeArgs(agent: Exclude<SavedAgent, null>): string[] | null {
     case "herdr:qwen\0qwen":
     case "herdr:grok\0grok":
       return ["--resume", value];
-    case "herdr:codex\0codex":
-      return ["resume", value];
     case "herdr:copilot\0copilot":
       return [`--resume=${value}`];
     case "herdr:kimi\0kimi":
-    case "herdr:pi\0pi":
     case "herdr:opencode\0opencode":
     case "herdr:kilo\0kilo":
       return ["--session", value];
