@@ -14,6 +14,7 @@ import {
   startAgentWhenReady,
 } from "./herdr.ts";
 import { type Environ, expandTilde, stateDirectory } from "./paths.ts";
+import { reportConversationValue } from "./tab-namer.ts";
 
 const safeText = z.string().refine(
   (value) =>
@@ -730,60 +731,169 @@ function resumeArgs(agent: Exclude<SavedAgent, null>): string[] | null {
 interface PendingAgent {
   paneId: string;
   agent: Exclude<SavedAgent, null>;
+  conversation: string;
 }
 
-async function restoreMissingSession(
-  services: SnapshotServices,
+function topologyMismatch(targetName: string, detail: string): CliError {
+  return new CliError(
+    "session_topology_mismatch",
+    `cannot resume Herdr session ${targetName}: its live topology does not match the snapshot (${detail})`,
+  );
+}
+
+async function restoreSavedWorkspace(
+  call: HerdrCall,
+  workspace: SavedWorkspace,
+): Promise<PendingAgent[]> {
+  const pending: PendingAgent[] = [];
+  const location = await createSavedWorkspace(call, workspace);
+  for (const [tabIndex, tab] of workspace.tabs.entries()) {
+    let tabId = location.tabId;
+    let rootPaneId = location.paneId;
+    if (tabIndex === 0) {
+      await invoke(call, ["tab", "rename", tabId, tab.label]);
+    } else {
+      const args = ["tab", "create", "--workspace", location.workspaceId];
+      const cwd = tab.panes[0]?.cwd ?? workspace.cwd;
+      if (cwd !== null) args.push("--cwd", cwd);
+      args.push("--label", tab.label, "--no-focus");
+      const created = createdLocation(
+        {
+          ...((await invoke(call, args)) as object),
+          workspace: { workspace_id: location.workspaceId },
+        },
+        "tab create",
+      );
+      tabId = created.tabId;
+      rootPaneId = created.paneId;
+    }
+    for (const [paneIndex, pane] of tab.panes.entries()) {
+      let paneId = rootPaneId;
+      if (paneIndex > 0) {
+        const args = ["pane", "split", rootPaneId, "--direction", "down"];
+        if (pane.cwd !== null) args.push("--cwd", pane.cwd);
+        args.push("--no-focus");
+        const result = (await invoke(call, args)) as { pane?: { pane_id?: unknown } } | null;
+        const splitPaneId = text(result?.pane?.pane_id);
+        if (splitPaneId === null) throw new HerdrError("herdr's pane split response named no pane");
+        paneId = splitPaneId;
+      }
+      if (pane.label !== null) await invoke(call, ["pane", "rename", paneId, pane.label]);
+      if (pane.agent !== null) pending.push({ paneId, agent: pane.agent, conversation: tab.label });
+    }
+    void tabId;
+  }
+  return pending;
+}
+
+async function pendingAgentsInExistingSession(
+  call: HerdrCall,
   session: SavedSession,
   targetName: string,
-): Promise<{ agentsStarted: number; agentsSkipped: number }> {
-  const call = services.call(targetName);
+): Promise<PendingAgent[]> {
+  const [workspaceResult, tabResult, paneResult] = await Promise.all([
+    invoke(call, ["workspace", "list"]),
+    invoke(call, ["tab", "list"]),
+    invoke(call, ["pane", "list"]),
+  ]);
+  const liveWorkspaces = rows(workspaceResult, "workspaces") as RawWorkspace[];
+  const liveTabs = rows(tabResult, "tabs") as RawTab[];
+  const livePanes = rows(paneResult, "panes") as RawPane[];
+
   const pending: PendingAgent[] = [];
-  for (const workspace of session.workspaces) {
-    const location = await createSavedWorkspace(call, workspace);
-    for (const [tabIndex, tab] of workspace.tabs.entries()) {
-      let tabId = location.tabId;
-      let rootPaneId = location.paneId;
-      if (tabIndex === 0) {
-        await invoke(call, ["tab", "rename", tabId, tab.label]);
-      } else {
-        const args = ["tab", "create", "--workspace", location.workspaceId];
-        const cwd = tab.panes[0]?.cwd ?? workspace.cwd;
-        if (cwd !== null) args.push("--cwd", cwd);
-        args.push("--label", tab.label, "--no-focus");
-        const created = createdLocation(
-          {
-            ...((await invoke(call, args)) as object),
-            workspace: { workspace_id: location.workspaceId },
-          },
-          "tab create",
+  const unmatchedWorkspaces = [...liveWorkspaces];
+  for (const savedWorkspace of session.workspaces) {
+    const agentTabs = savedWorkspace.tabs.filter((tab) =>
+      tab.panes.some((pane) => pane.agent !== null),
+    );
+    if (agentTabs.length === 0) continue;
+    let candidates =
+      savedWorkspace.git === null
+        ? unmatchedWorkspaces.filter((workspace) => text(workspace.label) === savedWorkspace.label)
+        : unmatchedWorkspaces.filter(
+            (workspace) =>
+              text(workspace.worktree?.checkout_path) === savedWorkspace.git?.checkout_path,
+          );
+    if (candidates.length > 1 && savedWorkspace.cwd !== null) {
+      candidates = candidates.filter((workspace) => {
+        const workspaceId = text(workspace.workspace_id);
+        return livePanes.some(
+          (pane) =>
+            text(pane.workspace_id) === workspaceId && text(pane.cwd) === savedWorkspace.cwd,
         );
-        tabId = created.tabId;
-        rootPaneId = created.paneId;
+      });
+    }
+    if (candidates.length === 0) {
+      pending.push(...(await restoreSavedWorkspace(call, savedWorkspace)));
+      continue;
+    }
+    if (candidates.length > 1) {
+      throw topologyMismatch(
+        targetName,
+        `workspace ${JSON.stringify(savedWorkspace.label)} has ${candidates.length} matches`,
+      );
+    }
+    const liveWorkspace = candidates[0] as RawWorkspace;
+    unmatchedWorkspaces.splice(unmatchedWorkspaces.indexOf(liveWorkspace), 1);
+    const workspaceId = text(liveWorkspace.workspace_id);
+    if (workspaceId === null) {
+      throw topologyMismatch(
+        targetName,
+        `workspace ${JSON.stringify(savedWorkspace.label)} has no id`,
+      );
+    }
+
+    const workspaceTabs = liveTabs.filter((tab) => text(tab.workspace_id) === workspaceId);
+    const unmatchedTabs = [...workspaceTabs];
+    for (const savedTab of agentTabs) {
+      const matchingTab = unmatchedTabs.find((tab) => text(tab.label) === savedTab.label);
+      if (matchingTab === undefined) {
+        throw topologyMismatch(
+          targetName,
+          `workspace ${JSON.stringify(savedWorkspace.label)} has no tab ${JSON.stringify(savedTab.label)}`,
+        );
       }
-      for (const [paneIndex, pane] of tab.panes.entries()) {
-        let paneId = rootPaneId;
-        if (paneIndex > 0) {
-          const args = ["pane", "split", rootPaneId, "--direction", "down"];
-          if (pane.cwd !== null) args.push("--cwd", pane.cwd);
-          args.push("--no-focus");
-          const result = (await invoke(call, args)) as { pane?: { pane_id?: unknown } } | null;
-          const splitPaneId = text(result?.pane?.pane_id);
-          if (splitPaneId === null)
-            throw new HerdrError("herdr's pane split response named no pane");
-          paneId = splitPaneId;
+      unmatchedTabs.splice(unmatchedTabs.indexOf(matchingTab), 1);
+      const tabId = text(matchingTab.tab_id);
+      if (tabId === null) {
+        throw topologyMismatch(targetName, `tab ${JSON.stringify(savedTab.label)} has no id`);
+      }
+      const tabPanes = livePanes.filter((pane) => text(pane.tab_id) === tabId);
+      for (const [paneIndex, savedPane] of savedTab.panes.entries()) {
+        if (savedPane.agent === null) continue;
+        const livePane = tabPanes[paneIndex];
+        if (
+          livePane === undefined ||
+          text(livePane.cwd) !== savedPane.cwd ||
+          text(livePane.label) !== savedPane.label
+        ) {
+          throw topologyMismatch(
+            targetName,
+            `tab ${JSON.stringify(savedTab.label)} pane ${paneIndex + 1} differs from the snapshot`,
+          );
         }
-        if (pane.label !== null) await invoke(call, ["pane", "rename", paneId, pane.label]);
-        if (pane.agent !== null) pending.push({ paneId, agent: pane.agent });
+        const paneId = text(livePane.pane_id);
+        if (paneId === null) {
+          throw topologyMismatch(
+            targetName,
+            `tab ${JSON.stringify(savedTab.label)} pane ${paneIndex + 1} has no id`,
+          );
+        }
+        pending.push({ paneId, agent: savedPane.agent, conversation: savedTab.label });
       }
-      void tabId;
     }
   }
+  return pending;
+}
 
+async function startPendingAgents(
+  call: HerdrCall,
+  pending: PendingAgent[],
+): Promise<{ agentsStarted: number; agentsSkipped: number }> {
   let agentsSkipped = 0;
   const names = new Set<string>();
   const resumed = new Set<string>();
-  const launches: Array<Promise<unknown>> = [];
+  const launches: Array<{ item: PendingAgent; start: Promise<unknown> }> = [];
   for (const item of pending) {
     const args = resumeArgs(item.agent);
     const session = item.agent.session;
@@ -800,17 +910,43 @@ async function restoreMissingSession(
     const preferred = item.agent.name;
     const name = preferred !== null && !names.has(preferred) ? preferred : nextAgentName(names);
     names.add(name);
-    launches.push(
-      startAgentWhenReady(call, {
+    launches.push({
+      item,
+      start: startAgentWhenReady(call, {
         name,
         kind: item.agent.harness,
         paneId: item.paneId,
         agentArgs: args,
       }),
-    );
+    });
   }
-  await Promise.all(launches);
+  await Promise.all(launches.map((launch) => launch.start));
+  await Promise.all(
+    launches.map(async ({ item }) => {
+      try {
+        await reportConversationValue(call, item.paneId, item.conversation);
+      } catch {
+        // The harness is already running, so a cosmetic metadata failure
+        // cannot turn the successful resume into a reported launch failure.
+        // The detection hook remains the retry path.
+      }
+    }),
+  );
   return { agentsStarted: launches.length, agentsSkipped };
+}
+
+async function restoreMissingSession(
+  services: SnapshotServices,
+  session: SavedSession,
+  targetName: string,
+): Promise<{ agentsStarted: number; agentsSkipped: number }> {
+  const call = services.call(targetName);
+  const pending: PendingAgent[] = [];
+  for (const workspace of session.workspaces) {
+    pending.push(...(await restoreSavedWorkspace(call, workspace)));
+  }
+
+  return startPendingAgents(call, pending);
 }
 
 async function waitUntilRunning(
@@ -832,7 +968,7 @@ async function waitUntilRunning(
 
 export interface SessionRestoreResult {
   name: string;
-  action: "skipped_running" | "started_existing" | "restored_missing";
+  action: "skipped_running" | "resumed_existing" | "restored_missing";
   agents_started: number;
   agents_skipped: number;
 }
@@ -849,22 +985,28 @@ export async function restoreSessionSnapshot(
     );
   }
   const existing = (await services.listSessions()).find((session) => session.name === targetName);
-  if (existing?.running === true) {
-    return {
-      name: targetName,
-      action: "skipped_running",
-      agents_started: 0,
-      agents_skipped: 0,
-    };
+  if (existing?.running !== true) {
+    services.startServer(targetName);
+    await waitUntilRunning(services, targetName);
   }
-  services.startServer(targetName);
-  await waitUntilRunning(services, targetName);
   if (existing !== undefined) {
+    const call = services.call(targetName);
+    const agentResult = await invoke(call, ["agent", "list"]);
+    if (rows(agentResult, "agents").length > 0) {
+      return {
+        name: targetName,
+        action: "skipped_running",
+        agents_started: 0,
+        agents_skipped: 0,
+      };
+    }
+    const pending = await pendingAgentsInExistingSession(call, snapshot.session, targetName);
+    const restored = await startPendingAgents(call, pending);
     return {
       name: targetName,
-      action: "started_existing",
-      agents_started: 0,
-      agents_skipped: 0,
+      action: "resumed_existing",
+      agents_started: restored.agentsStarted,
+      agents_skipped: restored.agentsSkipped,
     };
   }
   const restored = await restoreMissingSession(services, snapshot.session, targetName);

@@ -165,7 +165,7 @@ async function checkoutForCwd(call: HerdrCall, cwd: string): Promise<string | nu
   return `${repoName} ${BRANCH_MARKER} ${displayBranch}`;
 }
 
-async function reportConversationValue(
+export async function reportConversationValue(
   call: HerdrCall,
   paneId: string,
   value: string,
@@ -197,6 +197,7 @@ export async function reportConversationToken(
     pane?: {
       tab_id?: unknown;
       agent_session?: { agent?: unknown; value?: unknown } | null;
+      tokens?: unknown;
     };
   } | null;
   const pane = paneResult?.pane;
@@ -204,7 +205,9 @@ export async function reportConversationToken(
   if (typeof tabId !== "string" || tabId === "") {
     throw new HerdrError("herdr's pane response named no tab");
   }
-  let value = UNTITLED_CONVERSATION;
+  const tokens = pane?.tokens as Record<string, unknown> | null | undefined;
+  const restored = tokens?.["conversation"];
+  let value = typeof restored === "string" && restored !== "" ? restored : UNTITLED_CONVERSATION;
   const session = parsePaneSession(pane);
   const namedLabel =
     session === null || session === "unsupported"

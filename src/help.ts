@@ -47,10 +47,11 @@ Commands:
   session resume
             Resume one backup by session name from the default backup directory,
             or by explicit path, into its saved session name by default or the
-            --session override. A running target is a no-op; a stopped existing
-            target is only started; only a wholly missing target is
-            reconstructed. Missing dirty worktrees are refused because metadata
-            cannot contain uncommitted changes.
+            --session override. An occupied target is untouched. An agent-free
+            existing target reuses matching panes and recreates missing saved
+            agent workspaces; a wholly missing target is fully reconstructed.
+            Missing dirty worktrees are refused because metadata cannot contain
+            uncommitted changes.
   agents    List the surface's live agents — name (the tab's label), session
             id, harness, status, cwd. Agents in the caller's workspace by
             default; --all lists the whole session and adds each agent's

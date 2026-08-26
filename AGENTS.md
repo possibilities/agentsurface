@@ -123,11 +123,12 @@ re-implements neither side.
   strict response envelopes and consumed fields are validated before capture.
   Resume accepts a snapshot path or resolves a session name in that default
   backup directory, targets the saved session name unless explicitly
-  overridden, and is deliberately non-replacing: a running target is untouched, an existing
-  stopped target is only started so Herdr's native persistence remains
-  authoritative, and only a missing target is rebuilt before native harness
-  resume arguments are applied. A missing dirty worktree is refused because
-  metadata cannot carry uncommitted changes.
+  overridden, and is deliberately non-replacing: a target with running agents
+  is untouched; an agent-free existing target keeps its persisted topology and
+  resumes saved agents into matching panes, recreating a missing saved
+  agent-bearing workspace beside it and republishing each saved tab label as
+  the pane's conversation sidebar token; a missing target is fully rebuilt. A
+  missing dirty worktree is refused because metadata cannot carry uncommitted changes.
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
   installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
   entrypoint runs `agentsurface host -- agentlaunch --x-surface` in a
@@ -193,8 +194,10 @@ re-implements neither side.
   flattens the project ordering.
 - Session resume never replaces a target session name Herdr already knows.
   The target defaults to the name stored in the one-session backup and may be
-  overridden. Running targets are no-ops; stopped existing targets are started
-  without replay; topology reconstruction is reserved for absent names.
+  overridden. Targets with running agents are no-ops; agent-free existing
+  targets resume saved agents only after each agent-bearing pane matches the
+  snapshot, recreating agent-bearing workspaces that are wholly absent;
+  unrelated live topology is preserved.
 
 ## Validation
 
