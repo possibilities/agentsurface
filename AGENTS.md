@@ -33,7 +33,7 @@ re-implements neither side.
 ## Architecture
 
 - `main.ts` owns routing, exit semantics, and the popup-friendly failure
-  hold. Routes are `host`, `confirm`, `conversation slug`, `agents`, `message`, the internal
+  hold. Routes are `host`, `confirm`, `conversation slug`, `session dump`, `session resume`, `agents`, `message`, the internal
   `execute-directive` and `name-tab`, `--help`, `--version`. The conversation
   route holds nothing on screen and exits 3 (no such transcript) or 4 (no
   user prompt yet) so machine callers can poll.
@@ -128,6 +128,20 @@ re-implements neither side.
 - `state.ts`: the launch log of realized directives — bookkeeping, never
   authority. Project roots, priming, and the form's own state moved to
   agentlaunch with the form; agentsurface has no config file.
+- `session-snapshot.ts` saves selected running local Herdr servers through
+  public workspace/tab/pane/agent listings as one strict versioned JSON file
+  per session, defaulting to the `default` server and the app's XDG state
+  `session-backups` directory, and adding git branch/HEAD/dirty metadata for
+  linked worktrees. When a newer Herdr client refuses the older running server's
+  protocol, dump alone falls back to four read-only raw socket list methods;
+  strict response envelopes and consumed fields are validated before capture.
+  Resume accepts a snapshot path or resolves a session name in that default
+  backup directory, targets the saved session name unless explicitly
+  overridden, and is deliberately non-replacing: a running target is untouched, an existing
+  stopped target is only started so Herdr's native persistence remains
+  authoritative, and only a missing target is rebuilt before native harness
+  resume arguments are applied. A missing dirty worktree is refused because
+  metadata cannot carry uncommitted changes.
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
   installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
   entrypoint runs `agentsurface host -- agentlaunch --x-surface` in a
@@ -188,6 +202,10 @@ re-implements neither side.
   disambiguates duplicate labels.
 - Launch records append to the state log; losing or garbling it only
   flattens the project ordering.
+- Session resume never replaces a target session name Herdr already knows.
+  The target defaults to the name stored in the one-session backup and may be
+  overridden. Running targets are no-ops; stopped existing targets are started
+  without replay; topology reconstruction is reserved for absent names.
 
 ## Validation
 

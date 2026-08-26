@@ -23,6 +23,13 @@ import { CliError, UsageError } from "./errors.ts";
 import { TOP_HELP, VERSION } from "./help.ts";
 import { createHerdrCall, HerdrError } from "./herdr.ts";
 import { runHost } from "./host.ts";
+import { expandTilde } from "./paths.ts";
+import {
+  dumpSessionsToDirectory,
+  resolveSessionBackupPath,
+  resumeSessionFromFile,
+  sessionBackupDirectory,
+} from "./session-snapshot.ts";
 import { launchLogPath } from "./state.ts";
 import { nameTabFromEnvironment } from "./tab-namer.ts";
 
@@ -131,6 +138,76 @@ async function main(argv: string[]): Promise<number> {
       }
       if (error instanceof CliError || error instanceof HerdrError) {
         console.error(`error: ${error.message}`);
+        return 1;
+      }
+      console.error(`error: ${(error as Error).message ?? String(error)}`);
+      return 1;
+    }
+  }
+  if (first === "session") {
+    const action = argv[1];
+    if (action !== "dump" && action !== "resume") {
+      console.error("session takes dump or resume");
+      console.error(TOP_HELP);
+      return 2;
+    }
+    const pathArgument = argv[2]?.startsWith("--") === false ? argv[2] : undefined;
+    if (action === "resume" && pathArgument === undefined) {
+      console.error("session resume takes a session name or snapshot path");
+      console.error(TOP_HELP);
+      return 2;
+    }
+    const sessionNames: string[] = [];
+    const rest = argv.slice(pathArgument === undefined ? 2 : 3);
+    for (let index = 0; index < rest.length; index += 1) {
+      const arg = rest[index];
+      if (arg !== "--session" || rest[index + 1] === undefined) {
+        console.error(`${action} takes only repeated --session <name> options`);
+        console.error(TOP_HELP);
+        return 2;
+      }
+      sessionNames.push(rest[index + 1] as string);
+      index += 1;
+    }
+    if (action === "resume" && sessionNames.length > 1) {
+      console.error("session resume takes at most one --session <name> override");
+      return 2;
+    }
+    try {
+      const env = process.env;
+      const home = env["HOME"] ?? "";
+      const resolvedPath =
+        pathArgument === undefined
+          ? sessionBackupDirectory(env, home)
+          : action === "resume"
+            ? resolveSessionBackupPath(pathArgument, env, home)
+            : expandTilde(pathArgument, home);
+      if (action === "dump") {
+        console.log(
+          JSON.stringify(
+            { sessions: await dumpSessionsToDirectory(resolvedPath, sessionNames, env) },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.log(
+          JSON.stringify(
+            {
+              session: await resumeSessionFromFile(resolvedPath, env, sessionNames[0]),
+            },
+            null,
+            2,
+          ),
+        );
+      }
+      return 0;
+    } catch (error) {
+      if (error instanceof CliError || error instanceof HerdrError) {
+        console.error(`error: ${error.message}`);
+        if (error instanceof CliError && error.recovery !== undefined) {
+          console.error(error.recovery);
+        }
         return 1;
       }
       console.error(`error: ${(error as Error).message ?? String(error)}`);

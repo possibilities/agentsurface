@@ -314,6 +314,20 @@ describe("createHerdrCall", () => {
     return path;
   }
 
+  test("an explicit session prefixes every command", async () => {
+    const root = mkdtempSync(join(tmpdir(), "agentsurface-herdr-session-call-"));
+    roots.push(root);
+    const path = join(root, "herdr");
+    writeFileSync(
+      path,
+      '#!/bin/sh\n[ "$1" = "--session" ] && [ "$2" = "jobs" ] && [ "$3" = "workspace" ] && [ "$4" = "list" ] || exit 9\nprintf \'%s\' \'{"result":{"workspaces":[]}}\'\n',
+    );
+    chmodSync(path, 0o755);
+
+    const call = createHerdrCall({ HERDR_BIN_PATH: path }, "jobs");
+    expect(await call(["workspace", "list"])).toEqual({ result: { workspaces: [] } });
+  });
+
   test("a silent success is a success, not a missing response", async () => {
     // `pane report-metadata` and its siblings apply the change and answer
     // nothing at all; treating that silence as a failure once made every

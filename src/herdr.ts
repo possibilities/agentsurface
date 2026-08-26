@@ -31,12 +31,13 @@ export function herdrBinary(env: Environ): string {
   return env["HERDR_BIN_PATH"] ?? "herdr";
 }
 
-export function createHerdrCall(env: Environ): HerdrCall {
+export function createHerdrCall(env: Environ, sessionName?: string): HerdrCall {
   const binary = herdrBinary(env);
+  const prefix = sessionName === undefined ? [] : ["--session", sessionName];
   return async (args) => {
     let proc: ReturnType<typeof Bun.spawn>;
     try {
-      proc = Bun.spawn([binary, ...args], {
+      proc = Bun.spawn([binary, ...prefix, ...args], {
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",

@@ -117,6 +117,49 @@ herdr plugin (`plugin/`, linked by agentstart's installer). When herdr detects
 an agent in a pane, the hook renames its tab after the agent's conversation —
 once per tab, quietly skipping anything that never produces a prompt.
 
+## Session dump and resume
+
+```sh
+# Back up default to ~/.local/state/agentsurface/session-backups/default.json
+agentsurface session dump
+
+# Back up one or several named sessions, one JSON file each
+agentsurface session dump --session jobs --session review
+
+# An explicit output directory is still supported
+agentsurface session dump ~/herdr-sessions --session jobs
+
+# Restore a backup from the default directory by name
+agentsurface session resume default
+agentsurface session resume jobs
+
+# Explicit paths remain supported; --session overrides the restore target name
+agentsurface session resume ~/herdr-sessions/jobs.json
+agentsurface session resume ~/herdr-sessions/jobs.json --session recovered
+```
+
+`session dump` writes a separate strict, versioned JSON file for every selected
+running Herdr session. Its directory defaults to
+`~/.local/state/agentsurface/session-backups` (respecting `XDG_STATE_HOME`).
+With no `--session`, it selects `default`; repeat the option to back up multiple
+sessions. Each file includes workspace, tab, and pane labels and working
+directories; linked-worktree repository, checkout, branch, commit, and dirty
+state; and each detected harness's native session reference. If an upgraded
+Herdr client refuses those read-only listings from an older running server,
+AgentSurface falls back to the server's raw socket only for the four list calls.
+It validates their response formats before using them or writing a backup.
+
+Resume accepts either an explicit snapshot path or a session name, resolving a
+name such as `jobs` to the default backup directory's `jobs.json`. It is
+deliberately nondestructive and uses the saved session name unless `--session`
+overrides it. A running target is a no-op. A stopped target that already exists
+is only started, allowing Herdr's own persisted state to remain
+authoritative. AgentSurface reconstructs workspaces and resumes agents only
+when the target session is wholly absent. Existing linked worktrees are
+reopened; a missing clean worktree may be recreated at its saved commit, while
+a missing dirty worktree is refused because metadata cannot preserve its
+uncommitted changes.
+
 ## Message bus
 
 Agents on the surface can message each other:

@@ -7,6 +7,8 @@ Usage:
   agentsurface confirm --title <text> -- <command> [args…]
   agentsurface conversation slug <harness> <session-id-or-path>
   agentsurface conversation describe < requests.jsonl
+  agentsurface session dump [directory] [--session <name>]…
+  agentsurface session resume <name-or-path> [--session <name>]
   agentsurface agents [--all]
   agentsurface message <target> "<text>" [--wait-unblocked] [--timeout <ms>]
   agentsurface browser
@@ -37,6 +39,19 @@ Commands:
             lines: the stored slug when naming ever computed one (never
             computed here), and the first-prompt excerpt read from the
             transcript head. Built for the resume picker's listing.
+  session dump
+            Save one strict, versioned JSON backup per selected Herdr session.
+            The directory defaults to ~/.local/state/agentsurface/session-backups
+            (or XDG_STATE_HOME). Repeat --session to select one or more running
+            sessions; with no selection, back up default. Each file includes
+            topology, cwd, git/worktree state, and native session references.
+  session resume
+            Resume one backup by session name from the default backup directory,
+            or by explicit path, into its saved session name by default or the
+            --session override. A running target is a no-op; a stopped existing
+            target is only started; only a wholly missing target is
+            reconstructed. Missing dirty worktrees are refused because metadata
+            cannot contain uncommitted changes.
   agents    List the surface's live agents — name (the tab's label), session
             id, harness, status, cwd. Agents in the caller's workspace by
             default; --all lists the whole session and adds each agent's
@@ -63,6 +78,7 @@ Files:
   directive.schema.json (checked in)            the session directive format
   ~/.local/state/agentsurface/launches.jsonl    launch log of realized directives
   ~/.local/state/agentsurface/directives/       per-run directive evidence logs
+  ~/.local/state/agentsurface/session-backups/  default session backup directory
 
 Requires a running herdr session. The surface-handoff-protocol wiki page is
 the directive contract.
