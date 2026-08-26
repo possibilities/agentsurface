@@ -435,6 +435,80 @@ describe("session snapshot resume", () => {
     expect(stoppedService.starts).toEqual(["jobs"]);
   });
 
+  test("a restarted default session recreates a missing saved agent workspace", async () => {
+    const saved = snapshot();
+    saved.session.name = "default";
+    const service = fakeServices({
+      sessions: [{ name: "default", running: true }],
+      call: async (_session, args) => {
+        switch (args.slice(0, 2).join(" ")) {
+          case "agent list":
+            return { result: { agents: [] } };
+          case "workspace list":
+            return {
+              result: { workspaces: [{ workspace_id: "home", label: "~", worktree: null }] },
+            };
+          case "tab list":
+            return {
+              result: { tabs: [{ tab_id: "home:t1", workspace_id: "home", label: "1" }] },
+            };
+          case "pane list":
+            return {
+              result: {
+                panes: [
+                  {
+                    pane_id: "home:p1",
+                    workspace_id: "home",
+                    tab_id: "home:t1",
+                    cwd: "/home/person",
+                  },
+                ],
+              },
+            };
+          case "workspace create":
+            return {
+              result: {
+                workspace: { workspace_id: "w9" },
+                tab: { tab_id: "w9:t1" },
+                root_pane: { pane_id: "w9:p1" },
+              },
+            };
+          default:
+            return { result: {} };
+        }
+      },
+    });
+
+    expect(await restoreSessionSnapshot(saved, service)).toMatchObject({
+      name: "default",
+      action: "resumed_existing",
+      agents_started: 1,
+    });
+    expect(service.calls.map((call) => call.args)).toContainEqual([
+      "workspace",
+      "create",
+      "--cwd",
+      "/code/project",
+      "--label",
+      "fix-the-thing",
+      "--no-focus",
+    ]);
+    expect(service.calls.map((call) => call.args)).toContainEqual([
+      "agent",
+      "start",
+      "saved-agent",
+      "--kind",
+      "codex",
+      "--pane",
+      "w9:p1",
+      "--timeout",
+      "120000",
+      "--",
+      "--x-resume",
+      "session-123",
+    ]);
+  });
+
   test("topology drift is refused before any saved agent starts", async () => {
     const saved = snapshot();
     saved.session.name = "default";
@@ -442,9 +516,14 @@ describe("session snapshot resume", () => {
       sessions: [{ name: "default", running: true }],
       call: async (_session, args) => {
         if (args[0] === "agent" && args[1] === "list") return { result: { agents: [] } };
-        if (args[0] === "workspace" && args[1] === "list") {
-          return { result: { workspaces: [] } };
-        }
+        if (args[0] === "workspace" && args[1] === "list")
+          return {
+            result: {
+              workspaces: [{ workspace_id: "w1", label: "fix-the-thing", worktree: null }],
+            },
+          };
+        if (args[0] === "tab" && args[1] === "list") return { result: { tabs: [] } };
+        if (args[0] === "pane" && args[1] === "list") return { result: { panes: [] } };
         return { result: {} };
       },
     });

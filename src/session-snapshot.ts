@@ -739,6 +739,51 @@ function topologyMismatch(targetName: string, detail: string): CliError {
   );
 }
 
+async function restoreSavedWorkspace(
+  call: HerdrCall,
+  workspace: SavedWorkspace,
+): Promise<PendingAgent[]> {
+  const pending: PendingAgent[] = [];
+  const location = await createSavedWorkspace(call, workspace);
+  for (const [tabIndex, tab] of workspace.tabs.entries()) {
+    let tabId = location.tabId;
+    let rootPaneId = location.paneId;
+    if (tabIndex === 0) {
+      await invoke(call, ["tab", "rename", tabId, tab.label]);
+    } else {
+      const args = ["tab", "create", "--workspace", location.workspaceId];
+      const cwd = tab.panes[0]?.cwd ?? workspace.cwd;
+      if (cwd !== null) args.push("--cwd", cwd);
+      args.push("--label", tab.label, "--no-focus");
+      const created = createdLocation(
+        {
+          ...((await invoke(call, args)) as object),
+          workspace: { workspace_id: location.workspaceId },
+        },
+        "tab create",
+      );
+      tabId = created.tabId;
+      rootPaneId = created.paneId;
+    }
+    for (const [paneIndex, pane] of tab.panes.entries()) {
+      let paneId = rootPaneId;
+      if (paneIndex > 0) {
+        const args = ["pane", "split", rootPaneId, "--direction", "down"];
+        if (pane.cwd !== null) args.push("--cwd", pane.cwd);
+        args.push("--no-focus");
+        const result = (await invoke(call, args)) as { pane?: { pane_id?: unknown } } | null;
+        const splitPaneId = text(result?.pane?.pane_id);
+        if (splitPaneId === null) throw new HerdrError("herdr's pane split response named no pane");
+        paneId = splitPaneId;
+      }
+      if (pane.label !== null) await invoke(call, ["pane", "rename", paneId, pane.label]);
+      if (pane.agent !== null) pending.push({ paneId, agent: pane.agent });
+    }
+    void tabId;
+  }
+  return pending;
+}
+
 async function pendingAgentsInExistingSession(
   call: HerdrCall,
   session: SavedSession,
@@ -760,15 +805,13 @@ async function pendingAgentsInExistingSession(
       tab.panes.some((pane) => pane.agent !== null),
     );
     if (agentTabs.length === 0) continue;
-    let candidates = unmatchedWorkspaces.filter(
-      (workspace) => text(workspace.label) === savedWorkspace.label,
-    );
-    if (savedWorkspace.git !== null) {
-      candidates = candidates.filter(
-        (workspace) =>
-          text(workspace.worktree?.checkout_path) === savedWorkspace.git?.checkout_path,
-      );
-    }
+    let candidates =
+      savedWorkspace.git === null
+        ? unmatchedWorkspaces.filter((workspace) => text(workspace.label) === savedWorkspace.label)
+        : unmatchedWorkspaces.filter(
+            (workspace) =>
+              text(workspace.worktree?.checkout_path) === savedWorkspace.git?.checkout_path,
+          );
     if (candidates.length > 1 && savedWorkspace.cwd !== null) {
       candidates = candidates.filter((workspace) => {
         const workspaceId = text(workspace.workspace_id);
@@ -778,7 +821,11 @@ async function pendingAgentsInExistingSession(
         );
       });
     }
-    if (candidates.length !== 1) {
+    if (candidates.length === 0) {
+      pending.push(...(await restoreSavedWorkspace(call, savedWorkspace)));
+      continue;
+    }
+    if (candidates.length > 1) {
       throw topologyMismatch(
         targetName,
         `workspace ${JSON.stringify(savedWorkspace.label)} has ${candidates.length} matches`,
@@ -882,44 +929,7 @@ async function restoreMissingSession(
   const call = services.call(targetName);
   const pending: PendingAgent[] = [];
   for (const workspace of session.workspaces) {
-    const location = await createSavedWorkspace(call, workspace);
-    for (const [tabIndex, tab] of workspace.tabs.entries()) {
-      let tabId = location.tabId;
-      let rootPaneId = location.paneId;
-      if (tabIndex === 0) {
-        await invoke(call, ["tab", "rename", tabId, tab.label]);
-      } else {
-        const args = ["tab", "create", "--workspace", location.workspaceId];
-        const cwd = tab.panes[0]?.cwd ?? workspace.cwd;
-        if (cwd !== null) args.push("--cwd", cwd);
-        args.push("--label", tab.label, "--no-focus");
-        const created = createdLocation(
-          {
-            ...((await invoke(call, args)) as object),
-            workspace: { workspace_id: location.workspaceId },
-          },
-          "tab create",
-        );
-        tabId = created.tabId;
-        rootPaneId = created.paneId;
-      }
-      for (const [paneIndex, pane] of tab.panes.entries()) {
-        let paneId = rootPaneId;
-        if (paneIndex > 0) {
-          const args = ["pane", "split", rootPaneId, "--direction", "down"];
-          if (pane.cwd !== null) args.push("--cwd", pane.cwd);
-          args.push("--no-focus");
-          const result = (await invoke(call, args)) as { pane?: { pane_id?: unknown } } | null;
-          const splitPaneId = text(result?.pane?.pane_id);
-          if (splitPaneId === null)
-            throw new HerdrError("herdr's pane split response named no pane");
-          paneId = splitPaneId;
-        }
-        if (pane.label !== null) await invoke(call, ["pane", "rename", paneId, pane.label]);
-        if (pane.agent !== null) pending.push({ paneId, agent: pane.agent });
-      }
-      void tabId;
-    }
+    pending.push(...(await restoreSavedWorkspace(call, workspace)));
   }
 
   return startPendingAgents(call, pending);

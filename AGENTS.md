@@ -125,9 +125,10 @@ re-implements neither side.
   backup directory, targets the saved session name unless explicitly
   overridden, and is deliberately non-replacing: a target with running agents
   is untouched; an agent-free existing target keeps its persisted topology and
-  resumes saved agents into matching panes; only a missing target is rebuilt.
-  A missing dirty worktree is refused because metadata cannot carry
-  uncommitted changes.
+  resumes saved agents into matching panes, recreating a missing saved
+  agent-bearing workspace beside it; a missing target is fully rebuilt. A
+  missing dirty worktree is refused because metadata cannot carry uncommitted
+  changes.
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
   installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
   entrypoint runs `agentsurface host -- agentlaunch --x-surface` in a
@@ -194,8 +195,8 @@ re-implements neither side.
   The target defaults to the name stored in the one-session backup and may be
   overridden. Targets with running agents are no-ops; agent-free existing
   targets resume saved agents only after each agent-bearing pane matches the
-  snapshot; unrelated live topology is preserved and topology reconstruction
-  is reserved for absent names.
+  snapshot, recreating agent-bearing workspaces that are wholly absent;
+  unrelated live topology is preserved.
 
 ## Validation
 

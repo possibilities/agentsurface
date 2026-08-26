@@ -140,9 +140,10 @@ name such as `jobs` to the default backup directory's `jobs.json`. It is
 deliberately nondestructive and uses the saved session name unless `--session`
 overrides it. A target with running agents is a no-op. An agent-free existing
 target—including the always-present `default` session—keeps Herdr's persisted
-topology and resumes saved agents into its matching panes. Topology drift is
-ignored outside agent-bearing panes and refused within them before any agent
-starts. AgentSurface reconstructs workspaces only when the target session is
+topology, resumes saved agents into matching panes, and recreates a missing
+saved agent workspace beside it. Topology drift is ignored outside
+agent-bearing panes and refused within an existing match before any agent
+starts. AgentSurface fully reconstructs topology when the target session is
 wholly absent. Existing linked worktrees are reopened; a missing clean worktree
 may be recreated at its saved commit, while a missing dirty worktree is refused
 because metadata cannot preserve its uncommitted changes.
