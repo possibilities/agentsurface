@@ -138,13 +138,14 @@ It validates their response formats before using them or writing a backup.
 Resume accepts either an explicit snapshot path or a session name, resolving a
 name such as `jobs` to the default backup directory's `jobs.json`. It is
 deliberately nondestructive and uses the saved session name unless `--session`
-overrides it. A running target is a no-op. A stopped target that already exists
-is only started, allowing Herdr's own persisted state to remain
-authoritative. AgentSurface reconstructs workspaces and resumes agents only
-when the target session is wholly absent. Existing linked worktrees are
-reopened; a missing clean worktree may be recreated at its saved commit, while
-a missing dirty worktree is refused because metadata cannot preserve its
-uncommitted changes.
+overrides it. A target with running agents is a no-op. An agent-free existing
+target—including the always-present `default` session—keeps Herdr's persisted
+topology and resumes saved agents into its matching panes. Topology drift is
+ignored outside agent-bearing panes and refused within them before any agent
+starts. AgentSurface reconstructs workspaces only when the target session is
+wholly absent. Existing linked worktrees are reopened; a missing clean worktree
+may be recreated at its saved commit, while a missing dirty worktree is refused
+because metadata cannot preserve its uncommitted changes.
 
 ## Message bus
 

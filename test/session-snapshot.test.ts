@@ -87,6 +87,42 @@ function fakeServices(
   };
 }
 
+function existingTopologyCall(agents: unknown[] = []): (args: string[]) => Promise<HerdrResponse> {
+  return async (args) => {
+    switch (args.slice(0, 2).join(" ")) {
+      case "agent list":
+        return { result: { agents } };
+      case "workspace list":
+        return {
+          result: {
+            workspaces: [{ workspace_id: "w1", label: "fix-the-thing", worktree: null }],
+          },
+        };
+      case "tab list":
+        return {
+          result: {
+            tabs: [{ tab_id: "w1:t1", workspace_id: "w1", label: "fix-the-thing" }],
+          },
+        };
+      case "pane list":
+        return {
+          result: {
+            panes: [
+              {
+                pane_id: "w1:p1",
+                workspace_id: "w1",
+                tab_id: "w1:t1",
+                cwd: "/code/project",
+              },
+            ],
+          },
+        };
+      default:
+        return { result: {} };
+    }
+  };
+}
+
 describe("session snapshot capture", () => {
   test("uses raw capture only when the installed client is newer than the server", async () => {
     const socketCalls: string[][] = [];
@@ -323,30 +359,102 @@ describe("session snapshot capture", () => {
 });
 
 describe("session snapshot resume", () => {
-  test("running sessions are no-ops and stopped existing sessions only start", async () => {
-    const running = snapshot();
-    running.session.name = "default";
-    const runningService = fakeServices({ sessions: [{ name: "default", running: true }] });
-    expect(await restoreSessionSnapshot(running, runningService)).toEqual({
+  test("an occupied running session is left untouched", async () => {
+    const saved = snapshot();
+    saved.session.name = "default";
+    const service = fakeServices({
+      sessions: [{ name: "default", running: true }],
+      call: (_session, args) => existingTopologyCall([{ name: "live-agent" }])(args),
+    });
+
+    expect(await restoreSessionSnapshot(saved, service)).toEqual({
       name: "default",
       action: "skipped_running",
       agents_started: 0,
       agents_skipped: 0,
     });
-    expect(runningService.starts).toEqual([]);
-    expect(runningService.calls).toEqual([]);
+    expect(service.starts).toEqual([]);
+    expect(service.calls.map((call) => call.args)).toEqual([["agent", "list"]]);
+  });
 
+  test("an agent-free running default session resumes into its existing topology", async () => {
+    const saved = snapshot();
+    saved.session.name = "default";
+    saved.session.workspaces.unshift({
+      label: "closed-shell-workspace",
+      cwd: "/code/closed",
+      git: null,
+      tabs: [
+        {
+          label: "1",
+          panes: [{ cwd: "/code/closed", label: null, agent: null }],
+        },
+      ],
+    });
+    const service = fakeServices({
+      sessions: [{ name: "default", running: true }],
+      call: (_session, args) => existingTopologyCall()(args),
+    });
+
+    expect(await restoreSessionSnapshot(saved, service)).toEqual({
+      name: "default",
+      action: "resumed_existing",
+      agents_started: 1,
+      agents_skipped: 0,
+    });
+    expect(service.starts).toEqual([]);
+    expect(service.calls.map((call) => call.args)).toContainEqual([
+      "agent",
+      "start",
+      "saved-agent",
+      "--kind",
+      "codex",
+      "--pane",
+      "w1:p1",
+      "--timeout",
+      "120000",
+      "--",
+      "--x-resume",
+      "session-123",
+    ]);
+  });
+
+  test("a stopped existing session starts and then resumes its saved agents", async () => {
     const stopped = snapshot();
     stopped.session.name = "jobs";
-    const stoppedService = fakeServices({ sessions: [{ name: "jobs", running: false }] });
+    const stoppedService = fakeServices({
+      sessions: [{ name: "jobs", running: false }],
+      call: (_session, args) => existingTopologyCall()(args),
+    });
     expect(await restoreSessionSnapshot(stopped, stoppedService)).toEqual({
       name: "jobs",
-      action: "started_existing",
-      agents_started: 0,
+      action: "resumed_existing",
+      agents_started: 1,
       agents_skipped: 0,
     });
     expect(stoppedService.starts).toEqual(["jobs"]);
-    expect(stoppedService.calls).toEqual([]);
+  });
+
+  test("topology drift is refused before any saved agent starts", async () => {
+    const saved = snapshot();
+    saved.session.name = "default";
+    const service = fakeServices({
+      sessions: [{ name: "default", running: true }],
+      call: async (_session, args) => {
+        if (args[0] === "agent" && args[1] === "list") return { result: { agents: [] } };
+        if (args[0] === "workspace" && args[1] === "list") {
+          return { result: { workspaces: [] } };
+        }
+        return { result: {} };
+      },
+    });
+
+    await expect(restoreSessionSnapshot(saved, service)).rejects.toThrow(
+      "live topology does not match the snapshot",
+    );
+    expect(
+      service.calls.some((call) => call.args[0] === "agent" && call.args[1] === "start"),
+    ).toBeFalse();
   });
 
   test("a wholly missing session is reconstructed and its native conversation resumed", async () => {
