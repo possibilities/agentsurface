@@ -7,6 +7,7 @@ import {
   parsePaneEvent,
   reportConversationToken,
   reportSidebarProjectToken,
+  resumedRefFromProcessArgv,
   runTabNamer,
   type SlugOutcome,
   sessionClaimScope,
@@ -58,6 +59,9 @@ function surface(
     errorAfterReads?: number;
     tabLabel?: string;
     conversationToken?: string;
+    paneAgent?: string;
+    foregroundProcesses?: Array<{ argv: string[] }>;
+    processInfoError?: boolean;
     reportError?: boolean;
   } = {},
 ): FakeSurface {
@@ -88,12 +92,21 @@ function surface(
         result: {
           pane: {
             tab_id: options.tabForRead?.(fake.paneReads) ?? "tab_1",
+            ...(options.paneAgent === undefined ? {} : { agent: options.paneAgent }),
             agent_session: ready ? value : null,
             ...(options.conversationToken === undefined
               ? {}
               : { tokens: { conversation: options.conversationToken } }),
           },
         },
+      };
+    }
+    if (args[0] === "pane" && args[1] === "process-info") {
+      if (options.processInfoError === true) {
+        return { error: { code: "unsupported", message: "no process info" } };
+      }
+      return {
+        result: { process_info: { foreground_processes: options.foregroundProcesses ?? [] } },
       };
     }
     if (args[0] === "tab" && args[1] === "rename") {
@@ -153,6 +166,45 @@ describe("parsePaneEvent", () => {
     expect(
       parsePaneEvent(JSON.stringify({ data: { type: "pane_focused", pane_id: "pane_1" } })),
     ).toBeNull();
+  });
+});
+
+describe("resumedRefFromProcessArgv", () => {
+  test("reads AgentLaunch extension and native resume spellings", () => {
+    expect(
+      resumedRefFromProcessArgv(
+        ["bun", "/usr/local/bin/agentlaunch", "--x-harness", "codex", "--x-resume", "abc"],
+        "codex",
+      ),
+    ).toBe("abc");
+    expect(
+      resumedRefFromProcessArgv(
+        ["bun", "/usr/local/bin/agentlaunch", "--x-harness", "codex", "resume", "def"],
+        "codex",
+      ),
+    ).toBe("def");
+    expect(
+      resumedRefFromProcessArgv(
+        ["agentlaunch", "--x-harness", "claude", "--resume", "ghi"],
+        "claude",
+      ),
+    ).toBe("ghi");
+    expect(
+      resumedRefFromProcessArgv(
+        ["agentlaunch", "--x-harness", "pi", "--session", "/sessions/jkl.jsonl"],
+        "pi",
+      ),
+    ).toBe("/sessions/jkl.jsonl");
+  });
+
+  test("refuses another harness and non-AgentLaunch processes", () => {
+    expect(
+      resumedRefFromProcessArgv(
+        ["agentlaunch", "--x-harness", "claude", "--resume", "abc"],
+        "codex",
+      ),
+    ).toBeNull();
+    expect(resumedRefFromProcessArgv(["codex", "resume", "abc"], "codex")).toBeNull();
   });
 });
 
@@ -389,6 +441,49 @@ describe("reportConversationToken", () => {
 });
 
 describe("runTabNamer", () => {
+  test("names an adopted resume from AgentLaunch argv when herdr reports no session", async () => {
+    const fake = surface(null, {
+      paneAgent: "codex",
+      foregroundProcesses: [
+        {
+          argv: [
+            "bun",
+            "/usr/local/bin/agentlaunch",
+            "--x-harness",
+            "codex",
+            "resume",
+            "foreign-session",
+          ],
+        },
+      ],
+    });
+    const asked: string[][] = [];
+    const code = await namer(fake, stateDir(), async (harness, ref) => {
+      asked.push([harness, ref]);
+      return { kind: "slug", value: "adopted-conversation" };
+    });
+
+    expect(code).toBe(0);
+    expect(asked).toEqual([["codex", "foreign-session"]]);
+    expect(fake.renames).toEqual([["tab_1", "adopted-conversation"]]);
+  });
+
+  test("a failed process fallback keeps polling for herdr's session report", async () => {
+    const fake = surface(CLAUDE_SESSION, {
+      paneAgent: "claude",
+      processInfoError: true,
+      sessionAfterReads: 1,
+    });
+    const code = await namer(fake, stateDir(), async () => ({
+      kind: "slug",
+      value: "reported-later",
+    }));
+
+    expect(code).toBe(0);
+    expect(fake.paneReads).toBe(2);
+    expect(fake.renames).toEqual([["tab_1", "reported-later"]]);
+  });
+
   test("names the tab from the session's slug and keeps the claim", async () => {
     const fake = surface(CLAUDE_SESSION, { sessionAfterReads: 2 });
     const dir = stateDir();

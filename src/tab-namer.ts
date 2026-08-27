@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { HARNESS_NAMES, type HarnessName } from "./conversation/resolve.ts";
 import { conversationSlug } from "./conversation/slug.ts";
 import { CliError } from "./errors.ts";
@@ -245,8 +245,78 @@ function parsePaneSession(
   return { tabId, harness: agent as HarnessName, ref };
 }
 
+/** Recover the native conversation reference from AgentLaunch's own argv when
+ * a resumed harness does not re-report its session to herdr. This happens for
+ * conversations adopted from another herdr server: detection still identifies
+ * the harness, and the shim's long-lived AgentLaunch process still carries the
+ * explicit resume argv, but the pane's `agent_session` remains empty.
+ *
+ * Stay deliberately narrower than general process inference. A process must
+ * name AgentLaunch, must declare the same harness herdr detected, and must use
+ * that harness's exact native resume spelling (or AgentLaunch's `--x-resume`). */
+export function resumedRefFromProcessArgv(argv: string[], harness: HarnessName): string | null {
+  const launchIndex = argv.findIndex((token) => basename(token) === "agentlaunch");
+  if (launchIndex < 0) return null;
+  const tokens = argv.slice(launchIndex + 1);
+  const harnessIndex = tokens.indexOf("--x-harness");
+  if (harnessIndex < 0 || tokens[harnessIndex + 1] !== harness) return null;
+
+  const extensionResume = tokens.indexOf("--x-resume");
+  if (extensionResume >= 0) return resumeValue(tokens[extensionResume + 1]);
+
+  const marker = harness === "codex" ? "resume" : harness === "claude" ? "--resume" : "--session";
+  const markerIndex = tokens.indexOf(marker);
+  return markerIndex < 0 ? null : resumeValue(tokens[markerIndex + 1]);
+}
+
+function resumeValue(value: string | undefined): string | null {
+  return value === undefined || value === "" || value.startsWith("-") ? null : value;
+}
+
+async function resumedPaneSession(
+  call: HerdrCall,
+  paneId: string,
+  pane:
+    | {
+        tab_id?: unknown;
+        agent?: unknown;
+      }
+    | undefined,
+): Promise<PaneSession | null> {
+  const tabId = pane?.tab_id;
+  const agent = pane?.agent;
+  if (
+    typeof tabId !== "string" ||
+    typeof agent !== "string" ||
+    !(HARNESS_NAMES as readonly string[]).includes(agent)
+  ) {
+    return null;
+  }
+  const harness = agent as HarnessName;
+  let result: { process_info?: { foreground_processes?: unknown } } | null;
+  try {
+    result = (await invoke(call, ["pane", "process-info", "--pane", paneId])) as typeof result;
+  } catch (error) {
+    // Process inspection is only a recovery path. An older herdr or a pane
+    // racing its exit must not suppress the normal agent-session polling.
+    if (error instanceof HerdrError) return null;
+    throw error;
+  }
+  const processes = result?.process_info?.foreground_processes;
+  if (!Array.isArray(processes)) return null;
+  for (const process of processes) {
+    const argv = (process as { argv?: unknown }).argv;
+    if (!Array.isArray(argv) || !argv.every((token) => typeof token === "string")) continue;
+    const ref = resumedRefFromProcessArgv(argv, harness);
+    if (ref !== null) return { tabId, harness, ref };
+  }
+  return null;
+}
+
 /** One pane read: null while the pane has no reportable agent session. A
- * session for an agent outside the slug's harnesses is a permanent no. */
+ * session for an agent outside the slug's harnesses is a permanent no. A
+ * resumed AgentLaunch process can supply the reference when the adopted
+ * conversation never re-reports its session to herdr. */
 async function paneSession(
   call: HerdrCall,
   paneId: string,
@@ -254,10 +324,13 @@ async function paneSession(
   const result = (await invoke(call, ["pane", "get", paneId])) as {
     pane?: {
       tab_id?: unknown;
+      agent?: unknown;
       agent_session?: { agent?: unknown; value?: unknown } | null;
     };
   } | null;
-  return parsePaneSession(result?.pane);
+  const reported = parsePaneSession(result?.pane);
+  if (reported !== null) return reported;
+  return resumedPaneSession(call, paneId, result?.pane);
 }
 
 export type SlugOutcome =
