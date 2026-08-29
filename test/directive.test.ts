@@ -105,13 +105,13 @@ describe("findProjectWorkspace", () => {
           panes: [
             {
               workspace_id: "w7",
-              cwd: "/code/agentvoice",
+              cwd: "/code/agentdemo",
               foreground_cwd: "/code/alpha",
             },
           ],
         },
       },
-      { result: { workspaces: [{ workspace_id: "w7", label: "agentvoice" }] } },
+      { result: { workspaces: [{ workspace_id: "w7", label: "agentdemo" }] } },
     ]);
 
     expect(findProjectWorkspace(unrelated.call, "/code/alpha")).resolves.toBeNull();

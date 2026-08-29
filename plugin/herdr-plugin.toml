@@ -5,13 +5,12 @@ id = "agentsurface"
 name = "AgentSurface"
 version = "0.12.0"
 min_herdr_version = "0.8.0"
-description = "Launch agents, show usage, control voice, confirm topology closes, label projects, and name conversation tabs"
+description = "Launch agents, show usage, confirm topology closes, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
 
 # Popup titles follow one convention: the title-cased name of the CLI the TUI
-# is a frontend for — the launch form fronts agentlaunch, the usage dialog
-# fronts agentusage, the voice console fronts agentvoice. A new pane entrypoint
-# takes its CLI's name the same way.
+# is a frontend for — the launch form fronts agentlaunch and the usage dialog
+# fronts agentusage. A new pane entrypoint takes its CLI's name the same way.
 #
 # The launch surface is a session-modal popup over the active pane. The host
 # resolves the active pane's cwd and runs agentlaunch's form there, so the form
@@ -47,19 +46,6 @@ placement = "popup"
 width = "80%"
 height = "80%"
 command = ["escape-to-quit", "agentusage"]
-
-# The voice console's remote control: `agentvoice remote` attaches to the
-# console already running on this machine (waiting and reconnecting when it is
-# not), so the popup is a control surface, never a second audio session. It
-# takes no wrapper — the TUI owns esc for its ctrl+k palette, and `q` quits —
-# and it stays on 80% geometry because the remote adapts to any terminal shape.
-[[panes]]
-id = "voice"
-title = "Agent Voice"
-placement = "popup"
-width = "80%"
-height = "80%"
-command = ["agentvoice", "remote"]
 
 # Destructive topology keybindings open these minimal confirmation popups. All
 # three reuse AgentSurface's generic exact-argv confirmation; the internal

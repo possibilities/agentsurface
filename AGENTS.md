@@ -134,11 +134,9 @@ re-implements neither side.
   entrypoint runs `agentsurface host -- agentlaunch --x-surface` in a
   session-modal popup; the host resolves the active pane's cwd and runs the
   form there. Its `usage` pane entrypoint runs `agentusage` through the
-  escape-to-close wrapper; its `voice` pane entrypoint runs `agentvoice
-  remote`, bare — that TUI spends esc on its own palette and quits on `q`,
-  so the wrapper would close the popup instead of the palette. Popup titles
-  follow one convention — the title-cased name of the CLI the TUI fronts:
-  `Agent Launch`, `Agent Usage`, `Agent Voice`. Its three compact close
+  escape-to-close wrapper. Popup titles follow one convention — the
+  title-cased name of the CLI the TUI fronts: `Agent Launch` and `Agent Usage`.
+  Its three compact close
   entrypoints give AgentSurface's shared confirmation TUI stable titles and
   geometry while preserving the active topology ids in plugin context. Its
   `pane.agent_detected` and `pane.agent_status_changed` hooks both run

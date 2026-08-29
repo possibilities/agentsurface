@@ -223,9 +223,9 @@ describe("reportSidebarProjectToken", () => {
       if (args[0] === "worktree" && args[1] === "list") {
         return {
           result: {
-            source: { repo_name: "agentvoice", source_checkout_path: "/worktrees/clear-valley" },
+            source: { repo_name: "agentdemo", source_checkout_path: "/worktrees/clear-valley" },
             worktrees: [
-              { branch: "main", path: "/code/agentvoice" },
+              { branch: "main", path: "/code/agentdemo" },
               { branch: "worktree/clear-valley-003a", path: "/worktrees/clear-valley" },
             ],
           },
@@ -245,7 +245,7 @@ describe("reportSidebarProjectToken", () => {
       "--source",
       "agentsurface:sidebar",
       "--token",
-      "project=agentvoice \ue725 clear-valley-003a",
+      "project=agentdemo \ue725 clear-valley-003a",
     ]);
   });
 

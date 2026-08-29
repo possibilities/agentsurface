@@ -25,7 +25,7 @@ function record(paneId: string): Parameters<typeof appendHookRecord>[1] {
     event: "pane.agent_detected",
     paneId,
     outcomes: { project: "ok", conversation: "ok" },
-    held: { project: "agentvoice", conversation: "voice-chat-extraction-and-assembly" },
+    held: { project: "agentdemo", conversation: "demo-workflow-extraction-and-assembly" },
   };
 }
 
