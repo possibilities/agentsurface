@@ -312,8 +312,8 @@ async function main(argv: string[]): Promise<number> {
     }
   }
   if (first === "name-tab") {
-    // Internal: herdr's plugin event hook on pane.agent_detected. Quiet by
-    // design — failures reach herdr's plugin log, never a notification.
+    // Internal: herdr's plugin hook on agent detection and status changes.
+    // Quiet by design — failures reach herdr's plugin log, never a notification.
     if (argv.length > 1) {
       console.error("name-tab takes no arguments");
       return 2;

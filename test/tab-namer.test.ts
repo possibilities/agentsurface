@@ -7,6 +7,7 @@ import {
   parsePaneEvent,
   reportConversationToken,
   reportSidebarProjectToken,
+  reportSidebarProjectTokenForEvent,
   resumedRefFromProcessArgv,
   runTabNamer,
   type SlugOutcome,
@@ -364,6 +365,83 @@ describe("reportSidebarProjectToken", () => {
     await reportSidebarProjectToken(call, "pane_1");
 
     expect(calls[2]?.at(-1)).toBe("project=code × untracked");
+  });
+});
+
+describe("reportSidebarProjectTokenForEvent", () => {
+  const detected = parsePaneEvent(EVENT);
+  const statusChanged = parsePaneEvent(STATUS_EVENT);
+
+  function projectSurface(tokens?: Record<string, string>) {
+    const calls: string[][] = [];
+    const call: HerdrCall = async (args) => {
+      calls.push(args);
+      if (args[0] === "pane" && args[1] === "get") {
+        return {
+          result: {
+            pane: {
+              workspace_id: "ws_1",
+              cwd: "/code/agentsurface",
+              ...(tokens === undefined ? {} : { tokens }),
+            },
+          },
+        };
+      }
+      if (args[0] === "workspace" && args[1] === "get") {
+        return { result: { workspace: { label: "agentsurface" } } };
+      }
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          result: {
+            source: { repo_name: "agentsurface", source_checkout_path: "/code/agentsurface" },
+            worktrees: [{ branch: "main", path: "/code/agentsurface" }],
+          },
+        };
+      }
+      if (args[0] === "pane" && args[1] === "report-metadata") return { result: {} };
+      throw new Error(`unexpected herdr call: ${args.join(" ")}`);
+    };
+    return { call, calls };
+  }
+
+  test("a restored agent's status change repairs its missing project token", async () => {
+    const fake = projectSurface({ conversation: "kept-conversation" });
+
+    expect(await reportSidebarProjectTokenForEvent(fake.call, statusChanged)).toBe("published");
+    expect(fake.calls.filter((args) => args[0] === "worktree")).toHaveLength(1);
+    expect(fake.calls.at(-1)).toEqual([
+      "pane",
+      "report-metadata",
+      "pane_1",
+      "--source",
+      "agentsurface:sidebar",
+      "--token",
+      "project=agentsurface \ue725 main",
+    ]);
+  });
+
+  test("an ordinary status change leaves an existing project token alone", async () => {
+    const fake = projectSurface({ project: "agentsurface \ue725 main" });
+
+    expect(await reportSidebarProjectTokenForEvent(fake.call, statusChanged)).toBe("present");
+    expect(fake.calls).toEqual([["pane", "get", "pane_1"]]);
+  });
+
+  test("detection still publishes without first reading held tokens", async () => {
+    const fake = projectSurface({ project: "stale" });
+
+    expect(await reportSidebarProjectTokenForEvent(fake.call, detected)).toBe("published");
+    expect(fake.calls.filter((args) => args[0] === "pane" && args[1] === "get")).toHaveLength(1);
+    expect(fake.calls.some((args) => args[0] === "worktree")).toBe(true);
+  });
+
+  test("released and irrelevant events remain no-ops", async () => {
+    const fake = projectSurface();
+    const released = detected === null ? null : { ...detected, released: true };
+
+    expect(await reportSidebarProjectTokenForEvent(fake.call, released)).toBe("skipped");
+    expect(await reportSidebarProjectTokenForEvent(fake.call, null)).toBe("skipped");
+    expect(fake.calls).toHaveLength(0);
   });
 });
 

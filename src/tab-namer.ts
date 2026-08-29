@@ -12,8 +12,10 @@ import type { Environ } from "./paths.ts";
  * The plugin's event half: herdr runs `agentsurface name-tab` on every
  * `pane.agent_detected` and `pane.agent_status_changed`, and this names the
  * pane's tab after the agent's conversation — once — while keeping the
- * sidebar's `$conversation` token in step: an untitled placeholder from
- * detection, the slug once naming lands. Each invocation is one
+ * sidebar's metadata in step: `$project` is published on detection and
+ * repaired when a later status transition finds it missing, while
+ * `$conversation` moves from an untitled placeholder on detection to the
+ * slug once naming lands. Each invocation is one
  * bounded attempt: the pane is polled until its agent_session appears, then
  * the transcript until it holds a first prompt (exit 4 from `conversation
  * slug` underneath), with windows sized for machine lag — herdr reports the
@@ -655,10 +657,11 @@ export async function runTabNamer(options: TabNamerOptions): Promise<number> {
   }
 }
 
-/** What herdr reports holding for the pane once the publishes settle. Read
- * back rather than assumed: a publish that returned cleanly and a token the
- * sidebar can actually draw are different claims, and only the second one
- * explains a blank row. Never throws — evidence is not worth a failed run. */
+/** What herdr reports holding for the pane. Read back rather than assumed: a
+ * publish that returned cleanly and a token the sidebar can actually draw are
+ * different claims, and only the second one explains a blank row. Status
+ * hooks also use this cheap read to avoid rediscovering a Project whose token
+ * survived. Never throws — missing evidence is not worth a failed run. */
 async function heldTokens(
   call: HerdrCall,
   paneId: string,
@@ -673,6 +676,24 @@ async function heldTokens(
   } catch (error) {
     return (error as Error).message;
   }
+}
+
+/** Publish `$project` for a live detection, or repair it after a status
+ * transition only when herdr no longer holds the token. A failed token read
+ * is not proof of absence, so leave it for a later transition rather than
+ * doing the more expensive Project/worktree discovery speculatively. */
+export async function reportSidebarProjectTokenForEvent(
+  call: HerdrCall,
+  event: PaneEvent | null,
+): Promise<"published" | "present" | "skipped"> {
+  if (event === null || event.released) return "skipped";
+  if (event.kind === "status_changed") {
+    const tokens = await heldTokens(call, event.paneId);
+    if (typeof tokens === "string") return "skipped";
+    if (tokens !== null && typeof tokens["project"] === "string") return "present";
+  }
+  await reportSidebarProjectToken(call, event.paneId);
+  return "published";
 }
 
 export async function nameTabFromEnvironment(env: Environ, home: string): Promise<number> {
@@ -692,15 +713,26 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
   const sessionScope = sessionClaimScope(socketPath);
   const call = createHerdrCall(env);
   const event = parsePaneEvent(eventJson);
-  // The tokens ride detection only: neither a pane's project nor its tab's
-  // named state moves on a status transition, and transitions fire every
-  // turn boundary. The project token publishes beside the namer, off
-  // naming's critical path; the conversation token publishes before it, so
-  // the namer's slug report is always the later write.
+  // The project token publishes beside the namer, off naming's critical path.
+  // Status transitions fire every turn boundary, so they first inspect held
+  // metadata and repair only a missing token. The conversation token rides
+  // detection before naming, so the namer's slug report is always the later
+  // write.
   let token: Promise<void> = Promise.resolve();
   const outcomes: Record<string, string> = {};
   const detected =
     event !== null && event.kind === "agent_detected" && !event.released ? event : null;
+  if (event !== null && !event.released) {
+    token = reportSidebarProjectTokenForEvent(call, event).then(
+      (result) => {
+        if (detected !== null) outcomes["project"] = result === "published" ? "ok" : result;
+      },
+      (error: Error) => {
+        if (detected !== null) outcomes["project"] = error.message;
+        console.error(`name-tab: sidebar project token failed: ${error.message}`);
+      },
+    );
+  }
   // Only a detection is logged, and it is logged before any work: status
   // transitions fire on every turn boundary and would evict the run worth
   // reading, while a detection with no start record at all did not run —
@@ -714,15 +746,6 @@ export async function nameTabFromEnvironment(env: Environ, home: string): Promis
       paneId: detected.paneId,
       eventJson,
     });
-    token = reportSidebarProjectToken(call, detected.paneId).then(
-      () => {
-        outcomes["project"] = "ok";
-      },
-      (error: Error) => {
-        outcomes["project"] = error.message;
-        console.error(`name-tab: sidebar project token failed: ${error.message}`);
-      },
-    );
     try {
       await reportConversationToken(call, detected.paneId, stateDir, sessionScope);
       outcomes["conversation"] = "ok";
