@@ -7,6 +7,7 @@ import {
   runConfirmation,
   spawnConfirmedCommand,
 } from "./confirm.ts";
+import { contractEnvelope, ENTRYPOINT_FLAGS, parseInvocation, usageLine } from "./contract.ts";
 import {
   conversationSlug,
   EXIT_NO_PROMPT,
@@ -20,7 +21,7 @@ import {
 } from "./directive.ts";
 import { parseDirective } from "./directive-schema.ts";
 import { CliError, UsageError } from "./errors.ts";
-import { TOP_HELP, VERSION } from "./help.ts";
+import { renderAgentHelp, renderAgentTeaser, renderHelp, VERSION } from "./help.ts";
 import { createHerdrCall, HerdrError } from "./herdr.ts";
 import { runHost } from "./host.ts";
 import { expandTilde } from "./paths.ts";
@@ -56,14 +57,49 @@ async function holdForKeypress(): Promise<void> {
   });
 }
 
+/** A usage fault: the message, the help, exit 2. */
+function usage(error: unknown, help = true): number {
+  console.error(error instanceof Error ? error.message : String(error));
+  if (help) process.stderr.write(renderHelp());
+  return 2;
+}
+
 async function main(argv: string[]): Promise<number> {
   const first = argv[0];
-  if (first === undefined || first === "--help" || first === "-h") {
-    console.log(TOP_HELP);
+  // The entrypoint flags are spelled once, in contract.ts, so routing them
+  // and printing them in the usage line cannot disagree.
+  const entrypoint =
+    first === undefined
+      ? "help"
+      : ENTRYPOINT_FLAGS.find((flag) => flag.spellings.includes(first))?.kind;
+  if (entrypoint === "help") {
+    process.stdout.write(renderHelp());
     return 0;
   }
-  if (first === "--version" || first === "-V") {
+  if (entrypoint === "agent-help") {
+    process.stdout.write(renderAgentHelp());
+    return 0;
+  }
+  if (entrypoint === "agent-teaser") {
+    process.stdout.write(renderAgentTeaser());
+    return 0;
+  }
+  if (entrypoint === "version") {
     console.log(VERSION);
+    return 0;
+  }
+  if (first === "guide") {
+    // The contract itself. Every other help surface in this CLI renders from
+    // the same document, so there is nothing here authored twice.
+    try {
+      if (parseInvocation("guide", argv.slice(1)).flag("--json")) {
+        console.log(JSON.stringify(contractEnvelope(), null, 2));
+        return 0;
+      }
+    } catch (error) {
+      return usage(error);
+    }
+    process.stdout.write(renderAgentHelp());
     return 0;
   }
   if (first === "host") {
@@ -76,7 +112,7 @@ async function main(argv: string[]): Promise<number> {
     } catch (error) {
       if (error instanceof UsageError) {
         console.error(error.message);
-        console.error(TOP_HELP);
+        process.stderr.write(renderHelp());
         return 2;
       }
       if (error instanceof CliError) {
@@ -130,30 +166,19 @@ async function main(argv: string[]): Promise<number> {
     const action = argv[1];
     if (action !== "dump" && action !== "resume") {
       console.error("session takes dump or resume");
-      console.error(TOP_HELP);
+      process.stderr.write(renderHelp());
       return 2;
     }
-    const pathArgument = argv[2]?.startsWith("--") === false ? argv[2] : undefined;
-    if (action === "resume" && pathArgument === undefined) {
-      console.error("session resume takes a session name or snapshot path");
-      console.error(TOP_HELP);
-      return 2;
-    }
-    const sessionNames: string[] = [];
-    const rest = argv.slice(pathArgument === undefined ? 2 : 3);
-    for (let index = 0; index < rest.length; index += 1) {
-      const arg = rest[index];
-      if (arg !== "--session" || rest[index + 1] === undefined) {
-        console.error(`${action} takes only repeated --session <name> options`);
-        console.error(TOP_HELP);
-        return 2;
-      }
-      sessionNames.push(rest[index + 1] as string);
-      index += 1;
-    }
-    if (action === "resume" && sessionNames.length > 1) {
-      console.error("session resume takes at most one --session <name> override");
-      return 2;
+    let pathArgument: string | undefined;
+    let sessionNames: string[];
+    try {
+      // Which positional each takes, whether --session repeats, and that
+      // resume takes at most one override are all read off the contract.
+      const parsed = parseInvocation(`session ${action}`, argv.slice(2));
+      pathArgument = parsed.positional[0];
+      sessionNames = [...parsed.options("--session")];
+    } catch (error) {
+      return usage(error);
     }
     try {
       const env = process.env;
@@ -199,9 +224,10 @@ async function main(argv: string[]): Promise<number> {
   if (first === "conversation") {
     const second = argv[1];
     if (second === "describe") {
-      if (argv.length > 2) {
-        console.error("conversation describe reads its requests from stdin and takes no arguments");
-        return 2;
+      try {
+        parseInvocation("conversation describe", argv.slice(2));
+      } catch (error) {
+        return usage(error, false);
       }
       const { runDescribe } = await import("./conversation/describe.ts");
       const stdin = await new Response(process.stdin as unknown as ReadableStream).text();
@@ -212,7 +238,7 @@ async function main(argv: string[]): Promise<number> {
       console.error(
         second === undefined ? "conversation takes a subcommand" : `unknown subcommand "${second}"`,
       );
-      console.error(TOP_HELP);
+      process.stderr.write(renderHelp());
       return 2;
     }
     // Machine-invoked (the tab-naming plugin polls the distinct exit
@@ -223,7 +249,7 @@ async function main(argv: string[]): Promise<number> {
     } catch (error) {
       if (error instanceof UsageError) {
         console.error(error.message);
-        console.error(TOP_HELP);
+        process.stderr.write(renderHelp());
         return 2;
       }
       if (error instanceof CliError) {
@@ -242,53 +268,21 @@ async function main(argv: string[]): Promise<number> {
     // report and exit — no popup hold.
     try {
       if (first === "agents") {
-        const rest = argv.slice(1);
-        const all = rest[0] === "--all";
-        if ((all ? rest.slice(1) : rest).length > 0) {
-          console.error("agents takes only --all");
-          console.error(TOP_HELP);
-          return 2;
-        }
+        const all = parseInvocation("agents", argv.slice(1)).flag("--all");
         const env = process.env;
         console.log(await runAgents(createHerdrCall(env), env, env["HOME"] ?? "", all));
         return 0;
       }
-      const usage =
-        'message takes a target and one text argument: message <target> "<text>" [--wait-unblocked] [--timeout <ms>]';
-      const positionals: string[] = [];
-      let waitUnblocked = false;
-      let timeoutMs: number | undefined;
-      const rest = argv.slice(1);
-      for (let index = 0; index < rest.length; index += 1) {
-        const arg = rest[index] as string;
-        if (arg === "--wait-unblocked") {
-          waitUnblocked = true;
-        } else if (arg === "--timeout") {
-          const value = Number(rest[index + 1]);
-          if (!Number.isInteger(value) || value <= 0) {
-            console.error("--timeout takes a positive integer of milliseconds");
-            return 2;
-          }
-          timeoutMs = value;
-          index += 1;
-        } else if (arg.startsWith("--")) {
-          console.error(`unknown option "${arg}"`);
-          console.error(usage);
-          return 2;
-        } else {
-          positionals.push(arg);
-        }
+      // Flags, arity, the positive-integer timeout and its dependence on
+      // --wait-unblocked are the contract's; an empty text is the one thing
+      // it cannot say, so it stays here.
+      const parsed = parseInvocation("message", argv.slice(1));
+      const [target, text] = parsed.positional;
+      if (target === undefined || text === undefined || text === "") {
+        throw new UsageError(`give a target and one text argument: ${usageLine("message")}`);
       }
-      const [target, text] = positionals;
-      if (target === undefined || text === undefined || text === "" || positionals.length > 2) {
-        console.error(usage);
-        console.error(TOP_HELP);
-        return 2;
-      }
-      if (timeoutMs !== undefined && !waitUnblocked) {
-        console.error("--timeout requires --wait-unblocked");
-        return 2;
-      }
+      const waitUnblocked = parsed.flag("--wait-unblocked");
+      const timeoutMs = parsed.integer("--timeout");
       console.log(
         await runMessage(createHerdrCall(process.env), process.env, target, text, {
           waitUnblocked,
@@ -297,6 +291,7 @@ async function main(argv: string[]): Promise<number> {
       );
       return 0;
     } catch (error) {
+      if (error instanceof UsageError) return usage(error);
       if (error instanceof CliError) {
         console.error(`error: ${error.message}`);
         if (error.recovery !== undefined) console.error(error.recovery);
@@ -314,9 +309,10 @@ async function main(argv: string[]): Promise<number> {
   if (first === "name-tab") {
     // Internal: herdr's plugin hook on agent detection and status changes.
     // Quiet by design — failures reach herdr's plugin log, never a notification.
-    if (argv.length > 1) {
-      console.error("name-tab takes no arguments");
-      return 2;
+    try {
+      parseInvocation("name-tab", argv.slice(1));
+    } catch (error) {
+      return usage(error, false);
     }
     return await nameTabFromEnvironment(process.env, process.env["HOME"] ?? "");
   }
@@ -325,10 +321,8 @@ async function main(argv: string[]): Promise<number> {
     // close the moment a directive is submitted. There is no terminal to
     // hold — errors go to stderr and, best-effort, to a herdr notification.
     try {
-      if (argv.length !== 2) {
-        throw new UsageError("execute-directive takes the directive as one JSON argument");
-      }
-      const directive = parseDirective(argv[1] ?? "");
+      const [json] = parseInvocation("execute-directive", argv.slice(1)).positional;
+      const directive = parseDirective(json as string);
       const env = process.env;
       await executeDirective(
         createHerdrCall(env),
@@ -350,7 +344,7 @@ async function main(argv: string[]): Promise<number> {
     }
   }
   console.error(`unknown command "${first}"`);
-  console.error(TOP_HELP);
+  process.stderr.write(renderHelp());
   return 2;
 }
 

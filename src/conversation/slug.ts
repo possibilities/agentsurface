@@ -1,7 +1,8 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { loadLaunchCatalog } from "../catalog.ts";
-import { CliError, UsageError } from "../errors.ts";
+import { parseInvocation } from "../contract.ts";
+import { CliError } from "../errors.ts";
 import type { Environ } from "../paths.ts";
 import { expandTilde } from "../paths.ts";
 import { extractFirstPrompt } from "./extract.ts";
@@ -58,10 +59,12 @@ export async function conversationSlug(
   env: Environ,
   home: string,
 ): Promise<string> {
-  const [harnessArg, ref, ...extra] = args;
-  if (harnessArg === undefined || ref === undefined || extra.length > 0) {
-    throw new UsageError("conversation slug takes exactly <harness> <session-id-or-path>");
-  }
+  // Arity and the harness's closed set are the contract's; parseHarnessName
+  // narrows the checked string to the type the rest of the pipeline wants.
+  const [harnessArg, ref] = parseInvocation("conversation slug", args).positional as [
+    string,
+    string,
+  ];
   const harness = parseHarnessName(harnessArg);
   const path = resolveTranscript(harness, ref, env, home);
   const extracted = extractFirstPrompt(harness, readFileSync(path, "utf8"));
