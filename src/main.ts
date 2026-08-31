@@ -20,7 +20,8 @@ import {
 } from "./directive.ts";
 import { parseDirective } from "./directive-schema.ts";
 import { CliError, UsageError } from "./errors.ts";
-import { TOP_HELP, VERSION } from "./help.ts";
+import { contractEnvelope } from "./guide.ts";
+import { renderAgentHelp, renderAgentTeaser, renderHelp, VERSION } from "./help.ts";
 import { createHerdrCall, HerdrError } from "./herdr.ts";
 import { runHost } from "./host.ts";
 import { expandTilde } from "./paths.ts";
@@ -59,11 +60,35 @@ async function holdForKeypress(): Promise<void> {
 async function main(argv: string[]): Promise<number> {
   const first = argv[0];
   if (first === undefined || first === "--help" || first === "-h") {
-    console.log(TOP_HELP);
+    process.stdout.write(renderHelp());
+    return 0;
+  }
+  if (first === "--agent-help") {
+    process.stdout.write(renderAgentHelp());
+    return 0;
+  }
+  if (first === "--agent-teaser") {
+    process.stdout.write(renderAgentTeaser());
     return 0;
   }
   if (first === "--version" || first === "-V") {
     console.log(VERSION);
+    return 0;
+  }
+  if (first === "guide") {
+    // The contract itself. Every other help surface in this CLI renders from
+    // the same document, so there is nothing here authored twice.
+    const rest = argv.slice(1);
+    if (rest.length > 1 || (rest.length === 1 && rest[0] !== "--json")) {
+      console.error("guide takes only --json");
+      process.stderr.write(renderHelp());
+      return 2;
+    }
+    if (rest[0] === "--json") {
+      console.log(JSON.stringify(contractEnvelope(), null, 2));
+      return 0;
+    }
+    process.stdout.write(renderAgentHelp());
     return 0;
   }
   if (first === "host") {
@@ -76,7 +101,7 @@ async function main(argv: string[]): Promise<number> {
     } catch (error) {
       if (error instanceof UsageError) {
         console.error(error.message);
-        console.error(TOP_HELP);
+        process.stderr.write(renderHelp());
         return 2;
       }
       if (error instanceof CliError) {
@@ -130,13 +155,13 @@ async function main(argv: string[]): Promise<number> {
     const action = argv[1];
     if (action !== "dump" && action !== "resume") {
       console.error("session takes dump or resume");
-      console.error(TOP_HELP);
+      process.stderr.write(renderHelp());
       return 2;
     }
     const pathArgument = argv[2]?.startsWith("--") === false ? argv[2] : undefined;
     if (action === "resume" && pathArgument === undefined) {
       console.error("session resume takes a session name or snapshot path");
-      console.error(TOP_HELP);
+      process.stderr.write(renderHelp());
       return 2;
     }
     const sessionNames: string[] = [];
@@ -145,7 +170,7 @@ async function main(argv: string[]): Promise<number> {
       const arg = rest[index];
       if (arg !== "--session" || rest[index + 1] === undefined) {
         console.error(`${action} takes only repeated --session <name> options`);
-        console.error(TOP_HELP);
+        process.stderr.write(renderHelp());
         return 2;
       }
       sessionNames.push(rest[index + 1] as string);
@@ -212,7 +237,7 @@ async function main(argv: string[]): Promise<number> {
       console.error(
         second === undefined ? "conversation takes a subcommand" : `unknown subcommand "${second}"`,
       );
-      console.error(TOP_HELP);
+      process.stderr.write(renderHelp());
       return 2;
     }
     // Machine-invoked (the tab-naming plugin polls the distinct exit
@@ -223,7 +248,7 @@ async function main(argv: string[]): Promise<number> {
     } catch (error) {
       if (error instanceof UsageError) {
         console.error(error.message);
-        console.error(TOP_HELP);
+        process.stderr.write(renderHelp());
         return 2;
       }
       if (error instanceof CliError) {
@@ -246,7 +271,7 @@ async function main(argv: string[]): Promise<number> {
         const all = rest[0] === "--all";
         if ((all ? rest.slice(1) : rest).length > 0) {
           console.error("agents takes only --all");
-          console.error(TOP_HELP);
+          process.stderr.write(renderHelp());
           return 2;
         }
         const env = process.env;
@@ -282,7 +307,7 @@ async function main(argv: string[]): Promise<number> {
       const [target, text] = positionals;
       if (target === undefined || text === undefined || text === "" || positionals.length > 2) {
         console.error(usage);
-        console.error(TOP_HELP);
+        process.stderr.write(renderHelp());
         return 2;
       }
       if (timeoutMs !== undefined && !waitUnblocked) {
@@ -350,7 +375,7 @@ async function main(argv: string[]): Promise<number> {
     }
   }
   console.error(`unknown command "${first}"`);
-  console.error(TOP_HELP);
+  process.stderr.write(renderHelp());
   return 2;
 }
 

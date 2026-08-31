@@ -33,10 +33,23 @@ re-implements neither side.
 ## Architecture
 
 - `main.ts` owns routing, exit semantics, and the popup-friendly failure
-  hold. Routes are `host`, `confirm`, `conversation slug`, `session dump`, `session resume`, `agents`, `message`, the internal
-  `execute-directive` and `name-tab`, `--help`, `--version`. The conversation
+  hold. Routes are `guide`, `host`, `confirm`, `conversation slug`,
+  `conversation describe`, `session dump`, `session resume`, `agents`,
+  `message`, the internal `close-active`, `execute-directive` and `name-tab`,
+  `--help`, `--agent-help`, `--agent-teaser`, `--version`. The conversation
   route holds nothing on screen and exits 3 (no such transcript) or 4 (no
   user prompt yet) so machine callers can poll.
+- `guide.ts` is the fleet agent contract — the single authorship of what this
+  CLI is, what every command takes, and every `error.code` it can raise —
+  published as `agentsurface guide --json` and validated by
+  `agentstart/scripts/validate-agent-contract.ts`. `help.ts` renders it and
+  only it: `--help`, `--agent-help`, `--agent-teaser`, and bare `guide` are
+  four views of one document, so a command added to the contract appears in
+  all of them without a second edit. Adding a command means adding it there —
+  `test/guide.test.ts` fails a route that the contract does not list, and a
+  raised error code the contract does not declare. Every command appears,
+  internal ones included: `audience` is how a command is hidden, never
+  omission.
 - `host.ts` is the generic surface host: check herdr, resolve the context
   cwd (the focused pane's, asked of herdr — the popup does not inherit it),
   and run the tool with stdout piped while stdin and stderr stay the
