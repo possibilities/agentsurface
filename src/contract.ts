@@ -4,11 +4,17 @@
  * schema at agentstart/config/agent-contract/schema.json.
  *
  * This module is the only authorship of what this CLI is and what its
- * commands take. `--help`, `--agent-help`, and `--agent-teaser` are renders
- * of it (help.ts), never second copies — the hand-written top help this
- * replaced drifted from main.ts's own routing the moment a command was
- * added, which is the failure the contract exists to make impossible.
+ * commands take. `--help`, `--agent-help`, and `--agent-teaser` are RENDERS
+ * of it (help.ts), and every command's argv grammar is DERIVED from it
+ * (`parseInvocation` below, used by main.ts, confirm.ts, close.ts, host.ts,
+ * and conversation/slug.ts). A flag cannot exist in the parser and be
+ * missing from `guide --json`, because there is no second place to write
+ * one: the declaration below builds the parser that accepts it.
  */
+
+import { DEFAULT_WAIT_TIMEOUT_MS } from "./bus.ts";
+import { HARNESS_NAMES } from "./conversation/resolve.ts";
+import { UsageError } from "./errors.ts";
 
 export const CONTRACT_VERSION = 1;
 export const ENVELOPE_SCHEMA_VERSION = 1;
@@ -25,9 +31,31 @@ export interface ContractArgument {
   readonly required?: boolean;
   readonly positional?: boolean;
   readonly repeatable?: boolean;
+  readonly csv?: boolean;
   readonly choices?: readonly string[];
   readonly default?: unknown;
   readonly aliases?: readonly string[];
+  readonly minimum?: number;
+  readonly maximum?: number;
+  /** What kind of knob this is; a consumer building a call surface exposes
+   * only `call`. Absent means `call`, which is every argument here but
+   * `guide --json`. */
+  readonly role?: "call" | "output-format" | "store-selection" | "meta";
+  /**
+   * An `x_` extension, because the contract has no vocabulary for it and
+   * the parser it drives needs one: this positional is the trailing argv
+   * handed to another program verbatim. `separator: "required"` means a
+   * `--` must precede it (confirm, where the command is a gated payload);
+   * `"optional"` means `--` is allowed but not needed (host, whose first
+   * word is a tool name). Everything after it is that program's, never
+   * ours, which is why the generic parser stops reading flags there.
+   */
+  readonly x_passthrough?: { readonly separator: "required" | "optional" };
+}
+
+export interface ContractExample {
+  readonly invocation: string;
+  readonly description: string;
 }
 
 export interface ContractStdin {
@@ -37,7 +65,7 @@ export interface ContractStdin {
 }
 
 export interface ContractConstraint {
-  readonly kind: "one_of" | "conflicts" | "requires";
+  readonly kind: "one_of" | "at_least_one" | "conflicts" | "requires";
   readonly arguments: readonly string[];
   readonly required?: boolean;
   readonly description?: string;
@@ -53,6 +81,13 @@ export interface ContractCommand {
   readonly subcommands?: readonly ContractCommand[];
   readonly stdin?: ContractStdin;
   readonly constraints?: readonly ContractConstraint[];
+  readonly examples?: readonly ContractExample[];
+  /** The command waits on something outside itself and may not return
+   * promptly: a caller with a request timeout needs to know before it
+   * calls, not after it hangs. */
+  readonly blocking?: boolean;
+  readonly aliases?: readonly string[];
+  readonly deprecated?: string;
 }
 
 export interface Contract {
@@ -111,6 +146,16 @@ const AGENTS_COMMAND: ContractCommand = {
         "List every agent on the surface, not just the caller's workspace, with a place column.",
     },
   ],
+  examples: [
+    {
+      invocation: "agentsurface agents",
+      description: "The live agents in the caller's own workspace.",
+    },
+    {
+      invocation: "agentsurface agents --all",
+      description: "The whole session, each agent with the place that addresses it.",
+    },
+  ],
 };
 
 const MESSAGE_COMMAND: ContractCommand = {
@@ -118,6 +163,10 @@ const MESSAGE_COMMAND: ContractCommand = {
   summary: "Send text to another agent over the message bus",
   audience: "agent",
   mutates: true,
+  // Only with --wait-unblocked, but a caller reads `blocking` before it
+  // knows which flags it will pass, and a two-minute default wait is
+  // exactly the hang a request timeout needs warning about.
+  blocking: true,
   guidance:
     "herdr types the text into the target's harness like an operator message, behind a prefix naming the sender by every address it answers to. A working target queues it behind its current turn; an idle or done target reads it now; a blocked target rejects it and nothing is delivered. The confirmation line carries the target's status, so read it rather than assuming the message landed.",
   arguments: [
@@ -146,8 +195,9 @@ const MESSAGE_COMMAND: ContractCommand = {
       name: "--timeout",
       type: "integer",
       description:
-        "How long --wait-unblocked lingers, in milliseconds, before reporting the message undelivered.",
-      default: 120000,
+        "How long --wait-unblocked lingers, in milliseconds, before reporting the message undelivered. Match it to your own patience: a harness that kills the tool call first leaves nothing delivered and nothing reported.",
+      default: DEFAULT_WAIT_TIMEOUT_MS,
+      minimum: 1,
     },
   ],
   constraints: [
@@ -157,24 +207,54 @@ const MESSAGE_COMMAND: ContractCommand = {
       description: "A timeout only bounds the wait, so it is a usage fault without it.",
     },
   ],
+  examples: [
+    {
+      invocation: 'agentsurface message fix-the-tests "how far along is the migration?"',
+      description: "Address an agent by name — the label of the tab hosting it.",
+    },
+    {
+      invocation:
+        'agentsurface message quiet-valley-a17d "rebased onto main, pull before you push"',
+      description:
+        "Address it by place: a worktree name, in either spelling, while it holds exactly one agent.",
+    },
+    {
+      invocation:
+        'agentsurface message 019a3c4e-77b1-7f0a-9d2e-8f6b1c0d5e34 "answering your question: yes" --wait-unblocked --timeout 30000',
+      description:
+        "Reply to a session id — the address that cannot go stale — and linger up to 30s if the target is busy rather than failing on the first rejection.",
+    },
+  ],
 };
 
 const HOST_COMMAND: ContractCommand = {
   name: "host",
   summary: "Run a fleet TUI on this terminal and realize every session directive it emits",
   audience: "operator",
+  // Operator, not agent: herdr keybindings invoke it inside a popup that
+  // owns this terminal, and it runs for as long as the operator drives the
+  // hosted TUI. An agent calling it has no terminal to give it.
   mutates: true,
+  blocking: true,
   guidance:
-    "The host holds the tool's stdout as a pipe — the tool renders on stderr, still the popup's tty — and each complete JSON line it reads becomes a herdr workspace (or worktree) with an agent started in it, at once and detached. The launch form is `agentsurface host -- agentlaunch --x-surface`. Directive failures reach the operator as herdr notifications; the tool never learns what became of one.",
+    "The host holds the tool's stdout as a pipe — the tool renders on stderr, still the popup's tty — and each complete JSON line it reads becomes a herdr workspace (or worktree) with an agent started in it, at once and detached. The launch form is `agentsurface host -- agentlaunch --x-surface`. Directive failures reach the operator as herdr notifications; the tool never learns what became of one. Runs until the hosted tool exits. An operator verb, not an agent one: herdr's launch keybinding invokes it, and it owns this terminal for as long as the hosted tool draws on it.",
   arguments: [
     {
       name: "command",
       type: "string",
       description:
-        "The tool to run and its arguments, after an optional -- separator. Spawned exactly as given, in the focused pane's cwd.",
+        "The tool to run and its arguments, after an optional -- separator. Spawned exactly as given, in the focused pane's cwd; every word after the first is the tool's, not this CLI's.",
       positional: true,
       required: true,
       repeatable: true,
+      x_passthrough: { separator: "optional" },
+    },
+  ],
+  examples: [
+    {
+      invocation: "agentsurface host -- agentlaunch --x-surface",
+      description:
+        "The launch form: agentlaunch's picker draws on this terminal and every session it submits is realized on the surface.",
     },
   ],
 };
@@ -183,9 +263,13 @@ const CONFIRM_COMMAND: ContractCommand = {
   name: "confirm",
   summary: "Show a fail-closed terminal confirmation and run the command only when approved",
   audience: "operator",
+  // Operator, not agent: herdr's plugin binds it to the destructive keys,
+  // and its whole value is that a human answers. An agent that could pass
+  // the gate has not been gated.
   mutates: true,
+  blocking: true,
   guidance:
-    "Yes is selected by default; Enter or y confirms, and n, Esc, or q cancels. A missing interactive terminal refuses the command rather than assuming either answer. The command argv follows -- and is spawned exactly as given.",
+    "Yes is selected by default; Enter or y confirms, and n, Esc, or q cancels. A missing interactive terminal refuses the command rather than assuming either answer. The command argv follows -- and is spawned exactly as given. Waits for a keypress, so it returns when the operator answers and not before. An operator verb, not an agent one: herdr's plugin binds it to the destructive keys, and a gate an agent could pass on its own behalf is not a gate.",
   arguments: [
     {
       name: "--title",
@@ -196,17 +280,34 @@ const CONFIRM_COMMAND: ContractCommand = {
     {
       name: "command",
       type: "string",
-      description: "The exact argv to run on approval, after a required -- separator.",
+      description:
+        "The exact argv to run on approval, after a required -- separator. Everything after it belongs to that command.",
       positional: true,
       required: true,
       repeatable: true,
+      x_passthrough: { separator: "required" },
+    },
+  ],
+  examples: [
+    {
+      invocation: 'agentsurface confirm --title "Close pane?" -- agentsurface close-active pane',
+      description:
+        "The plugin's close entrypoints: the gate asks, and only an approved answer reaches close-active.",
     },
   ],
 };
 
+/** The pieces of herdr's captured context `close-active` can close —
+ * declared here because the contract's `choices` and close.ts's own type
+ * are the same fact, and this is where facts about arguments live. */
+export const CLOSE_TARGETS = ["pane", "tab", "workspace"] as const;
+
 const CLOSE_ACTIVE_COMMAND: ContractCommand = {
   name: "close-active",
   summary: "Close the herdr pane, tab, or workspace named in the plugin's captured context",
+  // Internal: it reads the ids out of HERDR_PLUGIN_CONTEXT_JSON, which only
+  // a herdr plugin pane entrypoint sets, so a call from anywhere else has
+  // nothing to close and refuses.
   audience: "internal",
   mutates: true,
   guidance:
@@ -218,7 +319,7 @@ const CLOSE_ACTIVE_COMMAND: ContractCommand = {
       description: "Which piece of the captured context to close.",
       positional: true,
       required: true,
-      choices: ["pane", "tab", "workspace"],
+      choices: CLOSE_TARGETS,
     },
   ],
 };
@@ -242,7 +343,7 @@ const CONVERSATION_COMMAND: ContractCommand = {
           description: "The harness whose store holds the transcript.",
           positional: true,
           required: true,
-          choices: ["claude", "codex", "pi"],
+          choices: HARNESS_NAMES,
         },
         {
           name: "session-id-or-path",
@@ -251,6 +352,17 @@ const CONVERSATION_COMMAND: ContractCommand = {
             "A session id from the harness's own store, or a transcript path. herdr reports either, so both are accepted.",
           positional: true,
           required: true,
+        },
+      ],
+      examples: [
+        {
+          invocation: "agentsurface conversation slug claude 019a3c4e-77b1-7f0a-9d2e-8f6b1c0d5e34",
+          description: "Name a claude conversation by the session id herdr reports.",
+        },
+        {
+          invocation:
+            "agentsurface conversation slug codex ~/.codex/sessions/2026/08/30/rollout-01.jsonl",
+          description: "A transcript path answers as well, which is the other thing herdr reports.",
         },
       ],
     },
@@ -265,9 +377,17 @@ const CONVERSATION_COMMAND: ContractCommand = {
         accepts: "json",
         required: true,
         description:
-          'One request per line — {"harness": "claude", "path": "…"} — answered as {"path", "slug", "excerpt"} lines: the stored slug when naming ever computed one, and the first-prompt excerpt read from the transcript head.',
+          'One request per line — {"harness": "claude", "path": "…"} — answered as {"path", "slug", "excerpt"} lines: the stored slug when naming ever computed one, and the first-prompt excerpt read from the transcript head. A line that is not JSON, or that names neither, is skipped rather than refused, so one bad row cannot cost the picker its listing.',
       },
       arguments: [],
+      examples: [
+        {
+          invocation:
+            'echo \'{"harness":"claude","path":"/home/u/.claude/projects/p/019a3c4e.jsonl"}\' | agentsurface conversation describe',
+          description:
+            "One request in, one answer line out. The picker pipes dozens per refresh through this single process.",
+        },
+      ],
     },
   ],
 };
@@ -301,6 +421,21 @@ const SESSION_COMMAND: ContractCommand = {
           repeatable: true,
         },
       ],
+      examples: [
+        {
+          invocation: "agentsurface session dump",
+          description:
+            "Back up the default session to ~/.local/state/agentsurface/session-backups/default.json.",
+        },
+        {
+          invocation: "agentsurface session dump --session jobs --session review",
+          description: "Several named sessions, one JSON file each.",
+        },
+        {
+          invocation: "agentsurface session dump ~/herdr-sessions --session jobs",
+          description: "An explicit output directory.",
+        },
+      ],
     },
     {
       name: "resume",
@@ -322,6 +457,18 @@ const SESSION_COMMAND: ContractCommand = {
           name: "--session",
           type: "string",
           description: "Resume into this session name instead of the one saved in the snapshot.",
+        },
+      ],
+      examples: [
+        {
+          invocation: "agentsurface session resume jobs",
+          description:
+            "Resolve `jobs` to jobs.json in the default backup directory and rebuild it under its saved name.",
+        },
+        {
+          invocation: "agentsurface session resume ~/herdr-sessions/jobs.json --session recovered",
+          description:
+            "An explicit snapshot, rebuilt beside the original under a different session name.",
         },
       ],
     },
@@ -370,6 +517,15 @@ const GUIDE_COMMAND: ContractCommand = {
       name: "--json",
       type: "boolean",
       description: "Emit the contract as the machine-readable envelope.",
+      // Output shape, not a parameter: a consumer building a call surface
+      // has already decided it wants the envelope.
+      role: "output-format",
+    },
+  ],
+  examples: [
+    {
+      invocation: "agentsurface guide --json",
+      description: "The whole contract as the {schema_version, ok, error, data} envelope.",
     },
   ],
 };
@@ -598,5 +754,274 @@ export function contractEnvelope(): {
     ok: true,
     error: null,
     data: CONTRACT,
+  };
+}
+
+// --- The command tree, walked ---
+
+export interface CommandNode {
+  /** The full path, space-joined: the identity everything addresses a
+   * command by, `read_only_commands` included. */
+  readonly path: string;
+  readonly command: ContractCommand;
+  readonly isGroup: boolean;
+}
+
+/** The command forest flattened to full paths, groups kept in place so a
+ * render can print the line a group owns. */
+export function walkCommands(
+  commands: readonly ContractCommand[] = CONTRACT.commands,
+  prefix: readonly string[] = [],
+): CommandNode[] {
+  const nodes: CommandNode[] = [];
+  for (const command of commands) {
+    const path = [...prefix, command.name];
+    const subcommands = command.subcommands ?? [];
+    nodes.push({ path: path.join(" "), command, isGroup: subcommands.length > 0 });
+    if (subcommands.length > 0) nodes.push(...walkCommands(subcommands, path));
+  }
+  return nodes;
+}
+
+export function findCommand(path: string): ContractCommand | undefined {
+  return walkCommands().find((node) => node.path === path)?.command;
+}
+
+/**
+ * Flags recognized only before a command name, so they are not arguments of
+ * anything and have no place in the contract document — but `--help` still
+ * has to print them and main.ts still has to route them, and those are two
+ * places to spell `--agent-teaser` wrong.
+ */
+export const ENTRYPOINT_FLAGS: readonly {
+  readonly kind: "help" | "agent-help" | "agent-teaser" | "version";
+  readonly spellings: readonly string[];
+}[] = [
+  { kind: "help", spellings: ["--help", "-h"] },
+  { kind: "agent-help", spellings: ["--agent-help"] },
+  { kind: "agent-teaser", spellings: ["--agent-teaser"] },
+  { kind: "version", spellings: ["--version", "-V"] },
+];
+
+// --- Argument spelling, from the argument that owns it ---
+
+function isFlag(argument: ContractArgument): boolean {
+  return argument.positional !== true;
+}
+
+export function valueLabel(argument: ContractArgument): string {
+  if (argument.choices !== undefined) return argument.choices.join("|");
+  return argument.name.replace(/^--/, "");
+}
+
+/** How one argument appears in a usage line. The single place argument
+ * syntax is rendered, so no usage line can drift from the argument list
+ * beside it — and the parser refuses exactly what this spells. */
+export function spellArgument(argument: ContractArgument): string {
+  if (argument.positional === true) {
+    const repeat = argument.repeatable === true ? "…" : "";
+    const inner = `${argument.name}${repeat}`;
+    const spelled = argument.required === true ? `<${inner}>` : `[${inner}]`;
+    const separator = argument.x_passthrough?.separator;
+    if (separator === "required") return `-- ${spelled}`;
+    if (separator === "optional") return `[--] ${spelled}`;
+    return spelled;
+  }
+  const value = argument.type === "boolean" ? "" : ` <${valueLabel(argument)}>`;
+  const repeat = argument.repeatable === true ? "…" : "";
+  const spelled = `${argument.name}${value}`;
+  return argument.required === true ? spelled : `[${spelled}]${repeat}`;
+}
+
+/** A command's invocation, spelled from its own arguments. */
+export function usageLine(path: string): string {
+  const node = walkCommands().find((candidate) => candidate.path === path);
+  if (node === undefined) throw new Error(`no contract command named "${path}"`);
+  const head = `${CONTRACT.meta.name} ${path}`;
+  if (node.isGroup) {
+    return `${head} <${(node.command.subcommands ?? []).map((sub) => sub.name).join("|")}>`;
+  }
+  const parts = [head];
+  for (const argument of node.command.arguments ?? []) parts.push(spellArgument(argument));
+  const stdin = node.command.stdin;
+  if (stdin !== undefined) parts.push(`< <${stdin.accepts}>`);
+  return parts.join(" ");
+}
+
+// --- The parser, derived from the declaration above ---
+
+/** What one parsed invocation answers. Values are read by the argument's
+ * own contract name, so a caller cannot ask for a flag the contract does
+ * not declare. */
+export interface ParsedInvocation {
+  /** The declared positionals, in declaration order. */
+  readonly positional: readonly string[];
+  /** The trailing argv of a passthrough positional — another program's
+   * arguments, never read as ours. Empty when the command declares none. */
+  readonly rest: readonly string[];
+  flag(name: string): boolean;
+  option(name: string): string | undefined;
+  options(name: string): readonly string[];
+  integer(name: string): number | undefined;
+}
+
+function leafFor(path: string): ContractCommand {
+  const node = walkCommands().find((candidate) => candidate.path === path);
+  if (node === undefined || node.isGroup) throw new Error(`no contract leaf named "${path}"`);
+  return node.command;
+}
+
+function checkValue(path: string, argument: ContractArgument, value: string): string {
+  if (argument.choices !== undefined && !argument.choices.includes(value)) {
+    throw new UsageError(
+      `${path} ${argument.name} must be one of ${argument.choices.join(", ")}, not "${value}"`,
+    );
+  }
+  if (argument.type === "integer" || argument.type === "number") {
+    const parsed = Number(value);
+    const whole = argument.type === "integer" ? Number.isInteger(parsed) : Number.isFinite(parsed);
+    if (!whole) {
+      throw new UsageError(
+        `${path} ${argument.name} takes ${argument.type === "integer" ? "an integer" : "a number"}, not "${value}"`,
+      );
+    }
+    if (argument.minimum !== undefined && parsed < argument.minimum) {
+      throw new UsageError(`${path} ${argument.name} is at least ${argument.minimum}`);
+    }
+    if (argument.maximum !== undefined && parsed > argument.maximum) {
+      throw new UsageError(`${path} ${argument.name} is at most ${argument.maximum}`);
+    }
+  }
+  return value;
+}
+
+/**
+ * Parse one command's argv against its own declaration. Every grammar
+ * decision — which flags exist, which take a value, which repeat, which
+ * values are in the closed set, which bounds an integer honours, which
+ * positionals are required, and which argument swallows a trailing argv —
+ * is read off the contract, so the parser cannot accept an argument
+ * `guide --json` does not publish. The commands themselves keep only the
+ * checks the contract has no vocabulary for.
+ */
+export function parseInvocation(path: string, argv: readonly string[]): ParsedInvocation {
+  const command = leafFor(path);
+  const declared = command.arguments ?? [];
+  const flags = new Map<string, ContractArgument>();
+  for (const argument of declared.filter(isFlag)) {
+    for (const spelling of [argument.name, ...(argument.aliases ?? [])]) {
+      flags.set(spelling, argument);
+    }
+  }
+  const positionalArguments = declared.filter((argument) => argument.positional === true);
+  const passthrough = positionalArguments.find((argument) => argument.x_passthrough !== undefined);
+  const leading = positionalArguments.filter((argument) => argument !== passthrough);
+
+  const positional: string[] = [];
+  const given = new Map<string, string[]>();
+  let rest: string[] | null = null;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index] as string;
+    if (passthrough !== undefined && token === "--") {
+      rest = [...argv.slice(index + 1)];
+      break;
+    }
+    if (token.startsWith("--")) {
+      const argument = flags.get(token);
+      if (argument === undefined) throw new UsageError(`unknown ${path} option "${token}"`);
+      const occurrences = given.get(argument.name) ?? [];
+      if (occurrences.length > 0 && argument.repeatable !== true) {
+        throw new UsageError(`${path} takes at most one ${argument.name}`);
+      }
+      if (argument.type === "boolean") {
+        occurrences.push("");
+      } else {
+        const value = argv[index + 1];
+        if (value === undefined || value === "" || value === "--") {
+          throw new UsageError(`${path} ${argument.name} takes a non-empty value`);
+        }
+        occurrences.push(checkValue(path, argument, value));
+        index += 1;
+      }
+      given.set(argument.name, occurrences);
+      continue;
+    }
+    if (positional.length >= leading.length) {
+      if (passthrough === undefined) {
+        throw new UsageError(`${path} takes no argument "${token}": ${usageLine(path)}`);
+      }
+      if (passthrough.x_passthrough?.separator === "required") {
+        throw new UsageError(`${path} requires -- before <${passthrough.name}>`);
+      }
+      rest = [...argv.slice(index)];
+      break;
+    }
+    positional.push(checkValue(path, leading[positional.length] as ContractArgument, token));
+  }
+
+  if (passthrough !== undefined) {
+    const trailing = rest ?? [];
+    if (passthrough.required === true && trailing.length === 0) {
+      throw new UsageError(`${path} takes a command to run: ${usageLine(path)}`);
+    }
+    if ((trailing[0] ?? "").startsWith("-")) {
+      throw new UsageError(
+        `${path} takes a command, not an option, where <${passthrough.name}> is`,
+      );
+    }
+    rest = trailing;
+  }
+
+  for (const [index, argument] of leading.entries()) {
+    if (argument.required === true && positional[index] === undefined) {
+      throw new UsageError(`${path} takes <${argument.name}>: ${usageLine(path)}`);
+    }
+  }
+  for (const argument of declared.filter(isFlag)) {
+    if (argument.required === true && !given.has(argument.name)) {
+      throw new UsageError(`${path} requires ${spellArgument(argument)}`);
+    }
+  }
+
+  const wasGiven = (name: string): boolean => {
+    if (name.startsWith("-")) return given.has(name);
+    const at = leading.findIndex((argument) => argument.name === name);
+    return at >= 0 && positional[at] !== undefined;
+  };
+  for (const constraint of command.constraints ?? []) {
+    const present = constraint.arguments.filter(wasGiven);
+    const [first, ...others] = constraint.arguments;
+    if (constraint.kind === "requires" && first !== undefined && wasGiven(first)) {
+      for (const other of others) {
+        if (!wasGiven(other)) throw new UsageError(`${first} requires ${other}`);
+      }
+    }
+    if (constraint.kind === "conflicts" && present.length > 1) {
+      throw new UsageError(`${present.join(" and ")} may not be combined`);
+    }
+    if (constraint.kind === "one_of") {
+      if (present.length > 1) {
+        throw new UsageError(`give only one of ${constraint.arguments.join(", ")}`);
+      }
+      if (constraint.required === true && present.length === 0) {
+        throw new UsageError(`give exactly one of ${constraint.arguments.join(", ")}`);
+      }
+    }
+    if (constraint.kind === "at_least_one" && present.length === 0) {
+      throw new UsageError(`give at least one of ${constraint.arguments.join(", ")}`);
+    }
+  }
+
+  return {
+    positional,
+    rest: rest ?? [],
+    flag: (name) => (given.get(name)?.length ?? 0) > 0,
+    option: (name) => given.get(name)?.at(-1),
+    options: (name) => given.get(name) ?? [],
+    integer: (name) => {
+      const value = given.get(name)?.at(-1);
+      return value === undefined ? undefined : Number(value);
+    },
   };
 }

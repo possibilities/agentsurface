@@ -1,16 +1,16 @@
-import { CliError, UsageError } from "./errors.ts";
+import { type CLOSE_TARGETS, parseInvocation } from "./contract.ts";
+import { CliError } from "./errors.ts";
 import type { HerdrCall } from "./herdr.ts";
 import { invoke } from "./herdr.ts";
 import type { Environ } from "./paths.ts";
 
-export type CloseTarget = "pane" | "tab" | "workspace";
+export type CloseTarget = (typeof CLOSE_TARGETS)[number];
 
+/** The target's spelling, its closed set, and its arity are the contract's
+ * to state; this only narrows the string the derived parser already
+ * checked against `choices`. */
 function parseCloseTarget(argv: string[]): CloseTarget {
-  const target = argv[0];
-  if (argv.length !== 1 || (target !== "pane" && target !== "tab" && target !== "workspace")) {
-    throw new UsageError("close-active takes exactly one target: pane, tab, or workspace");
-  }
-  return target;
+  return parseInvocation("close-active", argv).positional[0] as CloseTarget;
 }
 
 export function closeTargetFromContext(env: Environ, target: CloseTarget): string {

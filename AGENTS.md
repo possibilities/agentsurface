@@ -39,17 +39,28 @@ re-implements neither side.
   `--help`, `--agent-help`, `--agent-teaser`, `--version`. The conversation
   route holds nothing on screen and exits 3 (no such transcript) or 4 (no
   user prompt yet) so machine callers can poll.
-- `guide.ts` is the fleet agent contract — the single authorship of what this
-  CLI is, what every command takes, and every `error.code` it can raise —
-  published as `agentsurface guide --json` and validated by
+- `contract.ts` is the fleet agent contract — the single authorship of what
+  this CLI is, what every command takes, and every `error.code` it can raise
+  — published as `agentsurface guide --json` and validated by
   `agentstart/scripts/validate-agent-contract.ts`. `help.ts` renders it and
   only it: `--help`, `--agent-help`, `--agent-teaser`, and bare `guide` are
   four views of one document, so a command added to the contract appears in
-  all of them without a second edit. Adding a command means adding it there —
-  `test/guide.test.ts` fails a route that the contract does not list, and a
-  raised error code the contract does not declare. Every command appears,
-  internal ones included: `audience` is how a command is hidden, never
-  omission.
+  all of them without a second edit. The argv grammar is *derived* from it
+  too: `parseInvocation(path, argv)` builds each command's parser out of its
+  own declared arguments — which flags exist, which take a value, which
+  repeat, which values are in the closed set, which bounds an integer
+  honours, which positionals are required, and which argument swallows a
+  trailing argv for another program (the `x_passthrough` extension, `host`
+  and `confirm`). main.ts, `confirm.ts`, `close.ts`, `host.ts`, and
+  `conversation/slug.ts` call it rather than reading argv themselves, so an
+  argument cannot exist in the parser and be missing from `guide --json`.
+  What stays hand-written beside a command is only what the contract has no
+  vocabulary for — that `message`'s text may not be empty, that a
+  passthrough's first word is a program name. Adding a command means adding
+  it there — `test/contract.test.ts` fails a route that the contract does
+  not list, and a raised error code the contract does not declare. Every
+  command appears, internal ones included: `audience` is how a command is
+  hidden, never omission.
 - `host.ts` is the generic surface host: check herdr, resolve the context
   cwd (the focused pane's, asked of herdr — the popup does not inherit it),
   and run the tool with stdout piped while stdin and stderr stay the

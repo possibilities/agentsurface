@@ -1,8 +1,8 @@
 import { appendFileSync, closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { parseInvocation } from "./contract.ts";
 import { notifyLaunchFailure, pruneSpool } from "./directive.ts";
 import { parseDirective } from "./directive-schema.ts";
-import { UsageError } from "./errors.ts";
 import { createHerdrCall, type HerdrCall, invoke } from "./herdr.ts";
 import type { Environ } from "./paths.ts";
 import { launchLogPath } from "./state.ts";
@@ -101,10 +101,10 @@ export function spawnDetachedExecutor(
 }
 
 export async function runHost(env: Environ, home: string, argv: string[]): Promise<number> {
-  const command = argv[0] === "--" ? argv.slice(1) : argv;
-  if (command.length === 0 || (command[0] ?? "").startsWith("-")) {
-    throw new UsageError("host takes the tool command to run: host [--] <command> [args…]");
-  }
+  // The optional -- separator, the requirement that a tool command follow
+  // it, and the refusal to read that command's own flags as ours are all
+  // declared on the contract's `command` argument.
+  const command = [...parseInvocation("host", argv).rest];
 
   // Everything fallible happens before the tool owns the terminal, so a
   // failure prints plainly where main's popup hold can show it.

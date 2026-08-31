@@ -1,6 +1,9 @@
+import { parseInvocation, usageLine } from "./contract.ts";
 import { CliError, UsageError } from "./errors.ts";
 
-export const CONFIRM_USAGE = "confirm --title <text> -- <command> [args…]";
+/** Spelled by the contract, so the usage main.ts prints on a refusal is the
+ * grammar the parser above it enforced. */
+export const CONFIRM_USAGE = usageLine("confirm").replace(/^agentsurface /, "");
 
 export interface Confirmation {
   title: string;
@@ -8,36 +11,18 @@ export interface Confirmation {
 }
 
 export function parseConfirmation(argv: string[]): Confirmation {
-  let title: string | undefined;
-  let index = 0;
-
-  while (index < argv.length && argv[index] !== "--") {
-    const option = argv[index];
-    const value = argv[index + 1];
-    if (option !== "--title") {
-      throw new UsageError(`unknown confirm option "${option ?? ""}"`);
-    }
-    if (value === undefined || value === "" || value === "--") {
-      throw new UsageError(`${option} takes a non-empty value`);
-    }
-    title = value;
-    index += 2;
-  }
-
-  if (argv[index] !== "--") {
-    throw new UsageError("confirm requires -- before the command");
-  }
-  const command = argv.slice(index + 1);
-  if (title === undefined || title === "") {
-    throw new UsageError("confirm requires --title <text>");
-  }
-  if (command.length === 0 || (command[0] ?? "").startsWith("-")) {
-    throw new UsageError("confirm requires a command after --");
-  }
-
+  // The grammar — --title takes a value, the command is the argv after a
+  // required --, and it may not itself start with a dash — is the
+  // contract's; what is left here is the narrowing it has no vocabulary
+  // for, that argv[0] is a program name.
+  const parsed = parseInvocation("confirm", argv);
+  const title = parsed.option("--title");
+  // The contract declares --title required, so the parser has already
+  // refused its absence; this narrows the type rather than re-deciding.
+  if (title === undefined) throw new UsageError(`confirm requires ${CONFIRM_USAGE}`);
   return {
     title,
-    command: command as [string, ...string[]],
+    command: [...parsed.rest] as [string, ...string[]],
   };
 }
 
