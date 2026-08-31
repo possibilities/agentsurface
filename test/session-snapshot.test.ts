@@ -596,7 +596,7 @@ describe("session snapshot resume", () => {
   });
 
   test("fleet harnesses resume through AgentLaunch rather than native open argv", async () => {
-    for (const harness of ["claude", "codex", "pi"] as const) {
+    for (const harness of ["claude", "codex"] as const) {
       const saved = snapshot();
       const agent = saved.session.workspaces[0]?.tabs[0]?.panes[0]?.agent;
       if (agent === null || agent === undefined || agent.session === null)

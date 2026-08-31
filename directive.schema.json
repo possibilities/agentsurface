@@ -29,7 +29,7 @@
         "kind": {
           "type": "string",
           "minLength": 1,
-          "description": "The herdr agent kind to start — a fleet harness name (claude, codex, pi). Herdr runs the kind's bare command, which is the fleet shim into agentlaunch."
+          "description": "The herdr agent kind to start — a fleet harness name (claude or codex). Herdr runs the kind's bare command, which is the fleet shim into agentlaunch."
         },
         "args": {
           "type": "array",

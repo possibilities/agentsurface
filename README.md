@@ -81,7 +81,7 @@ entrypoint instead of duplicating the title and geometry in the keybinding.
 agentsurface conversation slug <harness> <session-id-or-path>
 ```
 
-Prints a short list-ready slug for any claude, codex, or pi conversation —
+Prints a short list-ready slug for any claude or codex conversation —
 `build-agentsurface-launch-tui` — derived from its first substantive user
 prompt: housekeeping commands are skipped, a leading slash command and its
 `--flags` are stripped, valid `@path` mentions are replaced by the files

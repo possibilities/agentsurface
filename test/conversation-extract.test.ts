@@ -111,24 +111,3 @@ describe("extractFirstPrompt codex", () => {
     expect(extractFirstPrompt("codex", transcript)).toBeNull();
   });
 });
-
-describe("extractFirstPrompt pi", () => {
-  test("reads the session header cwd and the first user message", () => {
-    const transcript = jsonl([
-      { type: "session", version: 3, id: "abc", cwd: "/work/web" },
-      { type: "model_change", modelId: "gpt-5.6-sol" },
-      {
-        type: "message",
-        message: { role: "assistant", content: [{ type: "text", text: "hello" }] },
-      },
-      {
-        type: "message",
-        message: { role: "user", content: [{ type: "text", text: "ship the release" }] },
-      },
-    ]);
-    expect(extractFirstPrompt("pi", transcript)).toEqual({
-      prompt: "ship the release",
-      cwd: "/work/web",
-    });
-  });
-});

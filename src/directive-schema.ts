@@ -19,7 +19,7 @@ const agentSchema = z
       .string()
       .min(1)
       .describe(
-        "The herdr agent kind to start — a fleet harness name (claude, codex, pi). Herdr runs the kind's bare command, which is the fleet shim into agentlaunch.",
+        "The herdr agent kind to start — a fleet harness name (claude or codex). Herdr runs the kind's bare command, which is the fleet shim into agentlaunch.",
       ),
     args: z
       .array(

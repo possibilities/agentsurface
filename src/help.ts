@@ -27,8 +27,8 @@ Commands:
             interactive terminal refuses the command.
   conversation slug
             Print a short list-ready slug for a conversation, derived from
-            its first user prompt by the conversation's own harness (claude,
-            codex, or pi) at the catalog's metadata level. Exit 3: no such
+            its first user prompt by the conversation's own harness (claude or
+            codex) at the catalog's metadata level. Exit 3: no such
             transcript; exit 4: transcript holds no user prompt yet. Every
             computed slug is persisted to the slug store, so read-only
             surfaces never pay for inference.

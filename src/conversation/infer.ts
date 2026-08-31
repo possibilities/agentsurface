@@ -17,8 +17,8 @@ import type { HarnessName } from "./resolve.ts";
  * Every call runs in a fixed dedicated cwd so the sessions these
  * completions inevitably record collect under one quarantined workspace
  * (`~/.claude/projects/-tmp-agentsurface-inference`, codex's recorded cwd)
- * instead of polluting real projects' transcript spaces. A constant path,
- * created and never deleted — pi records nothing (`--no-session`).
+ * instead of polluting real projects' transcript spaces. The path is constant
+ * and created once.
  */
 
 export const INFERENCE_CWD = "/tmp/agentsurface/inference";
@@ -44,16 +44,10 @@ export function composeInference(
   if (harness === "claude") {
     return { argv: [...launch, "-p", instruction], lastMessageFile: null };
   }
-  if (harness === "codex") {
-    const file = join(INFERENCE_CWD, `last-message-${runToken}.txt`);
-    return {
-      argv: [...launch, "exec", "--output-last-message", file, instruction],
-      lastMessageFile: file,
-    };
-  }
+  const file = join(INFERENCE_CWD, `last-message-${runToken}.txt`);
   return {
-    argv: [...launch, "--mode", "text", "--no-session", "-p", instruction],
-    lastMessageFile: null,
+    argv: [...launch, "exec", "--output-last-message", file, instruction],
+    lastMessageFile: file,
   };
 }
 

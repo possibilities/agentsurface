@@ -190,12 +190,6 @@ describe("resumedRefFromProcessArgv", () => {
         "claude",
       ),
     ).toBe("ghi");
-    expect(
-      resumedRefFromProcessArgv(
-        ["agentlaunch", "--x-harness", "pi", "--session", "/sessions/jkl.jsonl"],
-        "pi",
-      ),
-    ).toBe("/sessions/jkl.jsonl");
   });
 
   test("refuses another harness and non-AgentLaunch processes", () => {
@@ -746,21 +740,6 @@ describe("runTabNamer", () => {
     });
     expect(code).toBe(0);
     expect(fake.renames).toHaveLength(0);
-  });
-
-  test("pi sessions travel as paths", async () => {
-    const fake = surface({
-      source: "herdr:pi",
-      agent: "pi",
-      kind: "path",
-      value: "/home/u/.pi/agent/sessions/x/y.jsonl",
-    });
-    const asked: string[][] = [];
-    await namer(fake, stateDir(), async (harness, ref) => {
-      asked.push([harness, ref]);
-      return { kind: "slug", value: "pi-work" };
-    });
-    expect(asked).toEqual([["pi", "/home/u/.pi/agent/sessions/x/y.jsonl"]]);
   });
 
   const CRASHED_SESSION = {

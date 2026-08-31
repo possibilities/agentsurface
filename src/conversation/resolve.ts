@@ -10,20 +10,19 @@ import type { Environ } from "../paths.ts";
  * Herdr reports an agent session as an id or as a path; both are accepted.
  */
 
-export const HARNESS_NAMES = ["claude", "codex", "pi"] as const;
+export const HARNESS_NAMES = ["claude", "codex"] as const;
 export type HarnessName = (typeof HARNESS_NAMES)[number];
 
 export function parseHarnessName(value: string): HarnessName {
   if ((HARNESS_NAMES as readonly string[]).includes(value)) return value as HarnessName;
-  throw new UsageError(`"${value}" is not a harness (expected claude, codex, or pi)`);
+  throw new UsageError(`"${value}" is not a harness (expected claude or codex)`);
 }
 
 /** Store roots follow each harness's own environment contract. */
 function storeRoot(harness: HarnessName, env: Environ, home: string): string {
   if (harness === "claude")
     return join(env["CLAUDE_CONFIG_DIR"] ?? join(home, ".claude"), "projects");
-  if (harness === "codex") return join(env["CODEX_HOME"] ?? join(home, ".codex"), "sessions");
-  return join(env["PI_CODING_AGENT_DIR"] ?? join(home, ".pi", "agent"), "sessions");
+  return join(env["CODEX_HOME"] ?? join(home, ".codex"), "sessions");
 }
 
 const ID_PATTERN = /^[A-Za-z0-9._-]+$/;
@@ -49,12 +48,7 @@ export function resolveTranscript(
   if (!ID_PATTERN.test(ref)) throw new UsageError(`"${ref}" is not a session id or path`);
   const root = storeRoot(harness, env, home);
   if (!existsSync(root)) throw transcriptNotFound(harness, ref);
-  const pattern =
-    harness === "claude"
-      ? `*/${ref}.jsonl`
-      : harness === "codex"
-        ? `**/rollout-*-${ref}.jsonl`
-        : `**/*_${ref}.jsonl`;
+  const pattern = harness === "claude" ? `*/${ref}.jsonl` : `**/rollout-*-${ref}.jsonl`;
   let latest: { path: string; mtime: number } | null = null;
   for (const match of new Bun.Glob(pattern).scanSync({ cwd: root, absolute: true })) {
     const mtime = statSync(match).mtimeMs;

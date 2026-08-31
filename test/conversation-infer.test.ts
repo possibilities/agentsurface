@@ -34,20 +34,6 @@ describe("composeInference", () => {
     ]);
     expect(codex.argv).toContain("--output-last-message");
     expect(codex.lastMessageFile).toContain("t2");
-
-    const pi = composeInference("pi", "gpt-5.4-mini:low", "the instruction", "t3");
-    expect(pi.argv).toEqual([
-      "agentlaunch",
-      "--x-harness",
-      "pi",
-      "--x-level",
-      "gpt-5.4-mini:low",
-      "--mode",
-      "text",
-      "--no-session",
-      "-p",
-      "the instruction",
-    ]);
   });
 });
 

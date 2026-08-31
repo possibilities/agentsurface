@@ -8,7 +8,7 @@ import { type Environ, stateDirectory } from "../paths.ts";
  * surfaces (the resume picker's `conversation describe`) must never have to
  * compute one — they show what naming already paid for, or nothing. Keyed
  * by the transcript file's basename, which every native store makes unique
- * (claude's uuid, codex's rollout name, pi's stamped name), so an id-or-path
+ * (Claude's UUID or Codex's rollout name), so an id-or-path
  * caller and a path-only reader agree without resolving anything.
  */
 

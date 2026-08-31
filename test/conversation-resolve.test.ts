@@ -24,7 +24,7 @@ function write(path: string, content = "{}"): void {
 }
 
 describe("parseHarnessName", () => {
-  test("accepts the three harnesses and nothing else", () => {
+  test("accepts the fleet harnesses and nothing else", () => {
     expect(parseHarnessName("claude")).toBe("claude");
     expect(() => parseHarnessName("gemini")).toThrow(UsageError);
   });
@@ -45,18 +45,8 @@ describe("resolveTranscript", () => {
       "rollout-2026-08-16T01-02-03-def456.jsonl",
     );
     write(codex);
-    const pi = join(
-      h,
-      ".pi",
-      "agent",
-      "sessions",
-      "--work-app--",
-      "2026-08-16T01-02-03-000Z_ghi789.jsonl",
-    );
-    write(pi);
     expect(resolveTranscript("claude", "abc-123", {}, h)).toBe(claude);
     expect(resolveTranscript("codex", "def456", {}, h)).toBe(codex);
-    expect(resolveTranscript("pi", "ghi789", {}, h)).toBe(pi);
   });
 
   test("a literal path wins; a missing one is transcript_not_found", () => {

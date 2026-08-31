@@ -700,7 +700,6 @@ function resumeArgs(agent: Exclude<SavedAgent, null>): string[] | null {
     // preserving the conversation's cwd, model-aware balancing, and policy.
     case "herdr:claude\0claude":
     case "herdr:codex\0codex":
-    case "herdr:pi\0pi":
       return ["--x-resume", value];
     case "herdr:devin\0devin":
     case "herdr:droid\0droid":

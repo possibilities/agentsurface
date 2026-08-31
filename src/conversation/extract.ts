@@ -9,8 +9,8 @@ import type { HarnessName } from "./resolve.ts";
  * transcript with no user prompt yet extracts to null, which the CLI
  * reports as its own exit code so a caller can poll.
  *
- * Shapes verified against live stores 2026-08-16 (claude 2.x, codex-cli
- * 0.147, pi v3 sessions); fixtures in test/conversation pin them.
+ * Shapes verified against live stores 2026-08-16 (claude 2.x and codex-cli
+ * 0.147); fixtures in test/conversation pin them.
  */
 
 export interface ExtractedPrompt {
@@ -29,12 +29,7 @@ export function extractFirstPrompt(harness: HarnessName, jsonl: string): Extract
       // A live transcript's last line may still be mid-write; skip it.
     }
   }
-  const candidates =
-    harness === "claude"
-      ? extractClaude(lines)
-      : harness === "codex"
-        ? extractCodex(lines)
-        : extractPi(lines);
+  const candidates = harness === "claude" ? extractClaude(lines) : extractCodex(lines);
   // The opening prompt is the first substantive one: housekeeping commands
   // (a /model toggle, a bare /reload-plugins) name no work, so they only
   // stand when the conversation never says anything else.
@@ -47,7 +42,7 @@ function asLine(value: unknown): Line | null {
   return typeof value === "object" && value !== null ? (value as Line) : null;
 }
 
-/** Join a claude/pi content value: a plain string, or blocks whose text
+/** Join a Claude content value: a plain string, or blocks whose text
  * entries carry the typed prompt (tool results and images are not prose). */
 function contentText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -116,25 +111,6 @@ function extractCodex(lines: unknown[]): ExtractedPrompt[] {
     }
     const text = texts.join("\n").trim();
     if (text === "" || CODEX_INJECTED.some((pattern) => pattern.test(text))) continue;
-    candidates.push({ prompt: text, cwd });
-  }
-  return candidates;
-}
-
-/** Pi: a `session` header line records the cwd; `message` lines carry
- * role-tagged turns with text blocks. */
-function extractPi(lines: unknown[]): ExtractedPrompt[] {
-  const candidates: ExtractedPrompt[] = [];
-  let cwd: string | null = null;
-  for (const value of lines) {
-    const line = asLine(value);
-    if (line === null) continue;
-    if (line["type"] === "session" && typeof line["cwd"] === "string") cwd = line["cwd"];
-    if (line["type"] !== "message") continue;
-    const message = asLine(line["message"]);
-    if (message?.["role"] !== "user") continue;
-    const text = contentText(message["content"]).trim();
-    if (text === "") continue;
     candidates.push({ prompt: text, cwd });
   }
   return candidates;
