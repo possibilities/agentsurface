@@ -1,6 +1,9 @@
 ---
 name: bus
-description: Message the other live agents on this machine's herdr surface with the agentsurface CLI — discover who is running, send, reply, and reason about what delivery does and does not promise. Use when coordinating with another running agent ("tell the reviewer session…", "ask the other agent…"), when a message prefixed "Message sent over the agent message bus" arrives and deserves a reply, or when checking which agents are on the surface.
+description: >-
+  Discover and message independent agents on the local Herdr surface with
+  agentsurface. Use for cross-session coordination or replies to agent message
+  bus messages. Native subagent communication uses the harness's own tools.
 ---
 
 # Bus — messages between agents on the surface
