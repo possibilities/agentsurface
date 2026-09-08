@@ -36,7 +36,7 @@ re-implements neither side.
   hold. Routes are `guide`, `host`, `confirm`, `conversation slug`,
   `conversation describe`, `session dump`, `session resume`, `agents`,
   `message`, the internal `close-active`, `execute-directive` and `name-tab`,
-  `--help`, `--agent-help`, `--agent-teaser`, `--version`. The conversation
+  `mcp`, `--help`, `--agent-help`, `--agent-teaser`, `--version`. The conversation
   route holds nothing on screen and exits 3 (no such transcript) or 4 (no
   user prompt yet) so machine callers can poll.
 - `contract.ts` is the fleet agent contract — the single authorship of what
@@ -109,6 +109,14 @@ re-implements neither side.
   attempt as the probe, retried until `--timeout`). There is deliberately
   no deliver-later queue. `skills/bus/SKILL.md` is the runbook agents
   load; agentstart's skills scan installs it.
+- `mcp-tools.ts` derives only producer tools from the same contract. Its
+  `x_mcp_arguments` declare explicit per-call socket and caller context, outside
+  the terminal argv grammar. `mcp-server.ts` invokes shared typed handlers,
+  validates fresh caller identity, preserves text and domain errors, and never
+  rewrites process environment. `mcp.ts` reserves stdout for JSON-RPC and drains
+  cancelled handlers and their Herdr children before exiting on EOF or a signal.
+  Wire tests must cover concurrent callers, stale identity, bounded waits,
+  domain errors, and child reaping without a forced server shutdown.
 - `confirm.ts` is the generic terminal safety boundary for keybindings: a
   two-row decision — the question, then right-aligned `Yes No` with only the
   selected word highlighted and Yes focused by default — followed by an exact

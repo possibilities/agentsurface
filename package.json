@@ -40,7 +40,8 @@
     "check": "bun run lint && bun run typecheck && bun run test"
   },
   "dependencies": {
-    "zod": "^4"
+    "zod": "^4",
+    "@modelcontextprotocol/sdk": "1.30.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",

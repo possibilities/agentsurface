@@ -79,6 +79,8 @@ export interface ContractCommand {
   readonly guidance?: string;
   readonly arguments?: readonly ContractArgument[];
   readonly subcommands?: readonly ContractCommand[];
+  /** Explicit context for a shared MCP server; never part of terminal argv. */
+  readonly x_mcp_arguments?: readonly ContractArgument[];
   readonly stdin?: ContractStdin;
   readonly constraints?: readonly ContractConstraint[];
   readonly examples?: readonly ContractExample[];
@@ -119,20 +121,46 @@ export interface Contract {
 /** Routing doctrine, rendered verbatim by `--agent-help`. Its closing
  * paragraph is the operational footer — where state lives and what the CLI
  * needs to run — and `--help` prints that paragraph alone, so keep it last. */
-const GUIDANCE = `AgentSurface is the fleet's integration point with herdr, the terminal surface every fleet agent runs on. Most of its verbs are surface plumbing that herdr's plugin and agentlaunch invoke; the two an agent calls for itself are \`agents\` and \`message\`, the message bus.
+const GUIDANCE = `AgentSurface integrates fleet tools with the local Herdr terminal surface. Most of its verbs are surface plumbing that herdr's plugin and agentlaunch invoke; the two an agent calls for itself are \`agents\` and \`message\`, the message bus.
 
-Start with \`agents\`. It lists the live agents in your own workspace, and \`--all\` lists the whole session and adds each agent's place. Read the status column before you send: it decides what delivery will mean.
+Use \`agents\` when the target or its current state is uncertain. It lists the live agents in your own workspace, and \`--all\` lists the whole session and adds each agent's place. Read the status column before you send: it decides what delivery will mean.
 
 An agent answers to three addresses, and \`message\` resolves them in that order: its name — the label of the tab hosting it, matched in your workspace first and then across the session — then its session id, then its place, the worktree or workspace it works in, which addresses it only while it is the only agent there. A name always beats a spelling that is also somebody's worktree. More than one match in the deciding tier fails the send and lists the candidates' session ids; nothing is guessed, which is why a place that addressed an agent yesterday can refuse today once a second agent joined it.
 
 Delivery is not receipt. herdr types the message into the target's harness exactly like an operator message, behind a prefix naming every address you answer to, so the receiver can reply without any other introduction. An idle or done target reads it as its next turn; a working target queues it behind the turn it is running; a blocked target — one waiting on the operator — rejects it, and nothing was delivered. There is no inbox and no deliver-later queue: a message that cannot be typed now was not sent. \`--wait-unblocked\` lingers and retries until \`--timeout\` (120s by default) and then reports the message undelivered; reach for it when a target is merely busy, not when it is blocked on a human.
 
-The rest of the surface is not an agent interface. \`host\` and \`confirm\` are operator verbs bound to herdr keybindings; \`session dump\` and \`session resume\` are the backup and restore pair an operator drives; \`close-active\`, \`name-tab\`, \`execute-directive\`, and the \`conversation\` pair are subprocess entrypoints that herdr's plugin, the host, and agentlaunch's pickers invoke with context an agent does not have. Calling those by hand does nothing useful, and \`conversation slug\` spends real inference on somebody else's tab name.
+The rest of the surface is not an agent interface. \`host\` and \`confirm\` are operator verbs bound to herdr keybindings; \`session dump\` and \`session resume\` are the backup and restore pair an operator drives; \`close-active\`, \`name-tab\`, \`execute-directive\`, and the \`conversation\` pair are subprocess entrypoints that herdr's plugin, the host, and agentlaunch's pickers invoke with context an agent does not have. These routes remain available to their supported operator and internal callers; \`conversation slug\` spends inference on a tab name.
 
-Every command needs a running herdr session. State lives under ~/.local/state/agentsurface (XDG_STATE_HOME honoured): \`launches.jsonl\` records realized directives, \`directives/\` holds a per-run evidence log of every line read off a hosted tool's stdout, and \`session-backups/\` is the default session dump directory. The checked-in \`directive.schema.json\` publishes the session directive format, and the surface-handoff-protocol wiki page is its contract.`;
+Bus calls need a running herdr session; guide and MCP discovery work without one. Agents use MCP through Executor, passing their exact socket path and pane ID on every bus call. An optional expected session ID guards against pane reuse. Workspace and sender names come from fresh Herdr state, never the shared server environment. State lives under ~/.local/state/agentsurface (XDG_STATE_HOME honoured): \`launches.jsonl\` records realized directives, \`directives/\` holds a per-run evidence log of every line read off a hosted tool's stdout, and \`session-backups/\` is the default session dump directory. The checked-in \`directive.schema.json\` publishes the session directive format, and the surface-handoff-protocol wiki page is its contract.`;
+
+const BUS_MCP_CONTEXT: readonly ContractArgument[] = [
+  {
+    name: "--socket-path",
+    type: "string",
+    format: "path",
+    direction: "in",
+    required: true,
+    description:
+      "The caller's exact HERDR_SOCKET_PATH, as an absolute path. Never inherit the shared server's socket.",
+  },
+  {
+    name: "--caller-pane",
+    type: "string",
+    required: true,
+    description:
+      "The caller's HERDR_PANE_ID. The live pane and agent listings determine its workspace and sender identity.",
+  },
+  {
+    name: "--caller-session",
+    type: "string",
+    description:
+      "Expected native harness session ID, when available. Refuse a pane that now belongs to a different session.",
+  },
+];
 
 const AGENTS_COMMAND: ContractCommand = {
   name: "agents",
+  x_mcp_arguments: BUS_MCP_CONTEXT,
   summary: "List the surface's live agents",
   audience: "agent",
   mutates: false,
@@ -160,6 +188,7 @@ const AGENTS_COMMAND: ContractCommand = {
 
 const MESSAGE_COMMAND: ContractCommand = {
   name: "message",
+  x_mcp_arguments: BUS_MCP_CONTEXT,
   summary: "Send text to another agent over the message bus",
   audience: "agent",
   mutates: true,
@@ -195,7 +224,7 @@ const MESSAGE_COMMAND: ContractCommand = {
       name: "--timeout",
       type: "integer",
       description:
-        "How long --wait-unblocked lingers, in milliseconds, before reporting the message undelivered. Match it to your own patience: a harness that kills the tool call first leaves nothing delivered and nothing reported.",
+        "How long --wait-unblocked lingers, in milliseconds, before reporting the message undelivered. Choose a bounded wait. If cancellation interrupts a delivery attempt, its outcome may be unknown; reconcile before resending.",
       default: DEFAULT_WAIT_TIMEOUT_MS,
       minimum: 1,
     },
@@ -562,6 +591,7 @@ export const CONTRACT: Contract = {
         data: "payload | null",
         scope:
           "guide --json only. Every other command prints human-readable text on stdout — session dump and resume print a JSON report, conversation describe prints JSON lines — and reports failure on stderr as `error: <message>` with an optional recovery line.",
+        mcp: "MCP keeps agents/message as plain text and guide as this envelope. Domain failures set isError and retain the original code, message, and recovery in this envelope's error field, both as structuredContent and standalone JSON text. Usage and unexpected failures without a domain code stay plain tool errors.",
       },
       exit_codes: {
         "0": "success",
@@ -577,6 +607,13 @@ export const CONTRACT: Contract = {
         code: "bus_outside_pane",
         meaning: "The bus identifies the sender by its herdr pane, and HERDR_PANE_ID is not set.",
         recovery: "Run from a shell inside a herdr pane.",
+      },
+      {
+        code: "bus_sender_unavailable",
+        meaning:
+          "The supplied caller pane has no unique live agent, changed session, or inconsistent placement.",
+        recovery:
+          "Read the caller's current runtime identity and retry only with its actual pane and socket.",
       },
       {
         code: "bus_target_not_found",
@@ -722,13 +759,21 @@ export const CONTRACT: Contract = {
     ],
     read_only_commands: ["guide", "agents", "conversation describe"],
     agent_defaults: [
-      "Call `agentsurface agents` before addressing anyone: names change, and a place stops being an address the moment a second agent joins it.",
+      "Refresh agents when the target or its status is uncertain: names change, and a place stops being an address the moment a second agent joins it.",
       "Prefer a session id whenever a name or place is contested — it is the only address that is neither mutable nor collidable.",
       "Read the target's status before sending, and read the confirmation line after: delivery is not receipt.",
     ],
   },
   commands: [
     GUIDE_COMMAND,
+    {
+      name: "mcp",
+      summary: "Serve producer tools over stdio",
+      audience: "internal",
+      mutates: true,
+      blocking: true,
+      arguments: [],
+    },
     AGENTS_COMMAND,
     MESSAGE_COMMAND,
     HOST_COMMAND,
@@ -973,6 +1018,19 @@ export function parseInvocation(path: string, argv: readonly string[]): ParsedIn
     rest = trailing;
   }
 
+  return prepareInvocation(path, positional, given, rest ?? []);
+}
+
+/** Complete typed values against the same contract checks as parsed argv. */
+export function prepareInvocation(
+  path: string,
+  positional: string[],
+  given: ReadonlyMap<string, string[]>,
+  rest: string[] = [],
+): ParsedInvocation {
+  const command = leafFor(path);
+  const declared = command.arguments ?? [];
+  const leading = declared.filter((argument) => argument.positional && !argument.x_passthrough);
   for (const [index, argument] of leading.entries()) {
     if (argument.required === true && positional[index] === undefined) {
       throw new UsageError(`${path} takes <${argument.name}>: ${usageLine(path)}`);

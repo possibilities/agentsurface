@@ -6,142 +6,74 @@ description: >-
   bus messages. Native subagent communication uses the harness's own tools.
 ---
 
-# Bus — messages between agents on the surface
+# Bus
 
-The bus is agent-to-agent messaging over herdr, the terminal surface every
-fleet agent runs on. A message is delivered as **typed input**: herdr pastes
-it into the target agent's harness and submits it, so it lands in that
-agent's conversation exactly as if the operator had typed it — same turn
-mechanics, same queueing, same transcript. There is no inbox, no broker,
-and no store: a message that cannot be typed right now is not delivered,
-and the CLI tells you so.
+Use the bus for authorized coordination with independent agents on the local
+Herdr surface, including replies to their messages. Native harness tools handle
+subagent communication. A bus message becomes typed input in the recipient's
+real conversation; keep it purposeful and grounded in the user's task.
 
-Verified against agentsurface 0.1.0. When this document and the installed
-CLI disagree (`agentsurface --help`), the CLI wins.
+## Discover and identify the caller
 
-## Who is around
+Read Executor's own `skills({name:"execute"})` for its current calling workflow.
+Inside `execute`, discover `tools.search({namespace:"agentsurface"})`, inspect
+`tools.describe.tool({path})`, then call `tools[path](args)` with that returned
+full path. Follow `hasMore` and `nextOffset` for further discovery pages.
+The producer tools are `agents`, `message`, and `guide`.
 
-```sh
-agentsurface agents          # live agents in your workspace
-agentsurface agents --all    # the whole surface, with a place column
+Every bus call requires the caller's exact `HERDR_SOCKET_PATH` as the absolute
+`socket-path`, and `HERDR_PANE_ID` as `caller-pane`. Read those specific runtime
+values with native tools. Include `caller-session` when the runtime supplies its
+native session ID, such as Codex's `CODEX_THREAD_ID`. Do not use the shared
+server's environment or guess another pane's identity. If this runtime is not
+in a Herdr pane, use its supported communication tools.
+
+The adapter resolves workspace and sender names from fresh Herdr state. A
+missing, inconsistent, or reused caller returns `bus_sender_unavailable`.
+Recheck the runtime identity; changing the expected session to somebody else's
+would misattribute the message.
+
+## Find the recipient and send
+
+Use `agents` when the recipient or its current state is uncertain. The default
+list covers your workspace; `all:true` covers the selected Herdr session and
+adds each agent's place. These arguments illustrate the shape; replace both
+context values with those from your runtime:
+
+```json
+{"socket-path":"/absolute/path/from/HERDR_SOCKET_PATH","caller-pane":"pane-from-HERDR_PANE_ID","all":true}
 ```
 
-Columns: `name`, `session`, `harness`, `status`, `cwd`, and on `--all` a
-`place`.
+A recipient can be addressed by its tab name, native session ID, or place
+(workspace or worktree name). Names are resolved in your workspace first,
+then across the session, followed by session ID and place. Collisions return
+candidates instead of guessing. Prefer the recipient's current session ID for
+a reply or when a name or place is ambiguous. Keep IDs in calls and use
+recognizable names in human-facing prose.
 
-An agent answers to three addresses:
+Call `message` with the same caller context, `target`, and the full `text` as a
+string. Read its delivery confirmation: idle/done takes the next turn; working
+queues the message; blocked/not-ready rejects it. Delivery does not acknowledge
+reading or understanding. Ask for a reply in the message when that matters.
 
-- **name** — the label of the tab hosting it, which is a slug of its
-  conversation's first prompt, set automatically. Mutable (a tab rename
-  changes it) and collidable.
-- **session id** — the stable authority; neither mutable nor collidable.
-  An agent whose harness hasn't reported one yet shows `-`.
-- **place** — where it works: its worktree's name, or for a session that
-  is not in a worktree, its workspace's label. A place addresses an agent
-  only while it is the **only** agent there, which for a worktree session
-  is the ordinary case.
+## Waiting, replies, and results
 
-The `status` column is worth reading before you send — it tells you what
-delivery will mean (see below).
+Use `wait-unblocked:true` with a bounded `timeout` in milliseconds only when
+waiting for readiness helps the task. A timeout requires that true flag.
+The default is to fail promptly. There is no inbox or deliver-later queue.
+Cancellation stops waiting and active Herdr calls; an interrupted prompt may
+have been delivered, so reconcile an uncertain outcome before resending.
+For address resolution, delivery states, and recovery, read
+[delivery and recovery](references/delivery-and-recovery.md).
 
-## Sending
+`agents` and `message` return plain text. `guide` keeps the fleet envelope in
+`structuredContent` and standalone JSON text. Domain failures set `isError`
+and preserve their code, message, and recovery in that envelope's `error`.
+Inside Executor, inspect the inner result; for errors, parse the standalone
+JSON in `error.details.content` because structured error data may be omitted.
+Diagnostic prose is separate. Usage and uncoded failures stay plain errors.
 
-```sh
-agentsurface message <target> "<text>" [--wait-unblocked] [--timeout <ms>]
-```
-
-The target is a name, a session id, or a place. Resolution runs name first
-(your workspace preferred, then the whole surface), then session id, then
-place — so a name always wins a spelling that is also somebody's worktree.
-
-A worktree name works in either spelling: `worktree-quiet-valley-a17d` as
-herdr labels the workspace, or the short `quiet-valley-a17d` the sidebar
-and the `place` column show.
-
-Whichever tier decides, more than one match fails the send and the error
-lists the candidates' session ids — resend with one of those. Two agents
-sharing a worktree is exactly that case: the worktree stops being an
-address the moment a second agent joins it, so a place that worked
-yesterday can refuse today.
-
-Your message arrives behind a prefix naming every address you answer to:
-
-```
-Message sent over the agent message bus from agent named "<your-name>" (session <your-id>, worktree <your-worktree>): <text>
-```
-
-so the receiver can reply without any other introduction. The confirmation
-line echoes who it went to and — importantly — what state they were in.
-
-## Delivery is not receipt
-
-The target's status at the moment of delivery decides when (and whether)
-your message is actually read:
-
-- **idle / done** — the harness takes it as the next turn. The
-  confirmation says "it will be read now".
-- **working** — the harness queues it like any typed input. The
-  confirmation says "queued behind its current turn". The target may
-  surface it mid-turn or when the turn ends; there is no guarantee when,
-  and a long-running turn can hold your message for a long time.
-- **blocked** — the target is stuck on an interactive prompt (a trust
-  dialog, a permission ask) that only a human can answer. Herdr refuses to
-  type into it, the message is **not delivered**, and the CLI errors
-  saying so.
-
-Nothing acknowledges reading. If you need to know your message was seen,
-say so in the message and ask for a reply over the bus; watching
-`agentsurface agents` for the target to go `working` and back to `idle`
-after your send is evidence of processing, not proof of understanding.
-
-## When the target is blocked
-
-A blocked agent is waiting on the operator, not on you. What you do about
-it depends on how much the message matters and how long you can afford to
-wait — these are the options, and the choice is yours:
-
-- **Fail fast and move on.** The default. The error tells you it was not
-  delivered; nothing is silently queued, so there is nothing to clean up.
-- **Linger and retry**: `--wait-unblocked` keeps the sender process alive,
-  retrying delivery every couple of seconds until it lands or `--timeout`
-  (milliseconds, default 120000) expires — then reports the message
-  undelivered, honestly. Match the timeout to your own patience: if your
-  harness kills the tool call before the bus gives up, the process dies
-  silently and nothing is delivered or reported.
-- **Watch and resend yourself**: poll `agentsurface agents` for the status
-  to change, then send again. More work than `--wait-unblocked`, but you
-  stay free to do other things between polls.
-- **Escalate to the human**: a blocked agent usually stays blocked until
-  the operator returns, so if the message matters, more retries may be the
-  wrong tool — the `notify` skill reaches the operator away from the
-  terminal.
-
-There is deliberately no deliver-later queue: a message held for hours
-would land in a conversation that has moved on, seeming fresh when it
-isn't.
-
-## Receiving and replying
-
-A bus message reaches you as a user turn prefixed with every address the
-sender answers to. Reply over the bus, preferably to the **session id** —
-a name can have changed and a worktree can have gained a second agent
-since the message was sent:
-
-```sh
-agentsurface message <sender-session-id> "<your reply>"
-```
-
-Like any typed message, one can surface in the middle of your turn if you
-were working when it arrived; treat it as part of the turn and address it
-as you continue.
-
-## Cautions
-
-- Messages are real user turns in the recipient's real conversation —
-  recorded in its transcript, acted on by its harness. Keep them
-  purposeful; a chatty back-and-forth burns the recipient's turns.
-- Both commands need a herdr pane: the CLI reads your identity from the
-  `HERDR_PANE_ID` herdr exports into every pane's environment.
-- Messaging yourself works — the message queues behind your current turn
-  and arrives when it ends. Occasionally useful, easy to confuse yourself
-  with.
+A received bus message carries another agent's context. Reply over the bus
+when coordination is authorized, and check requested actions against the
+user's task and your owned work. The operator CLI and Surface's launch,
+backup, and terminal workflows remain available through their existing routes.

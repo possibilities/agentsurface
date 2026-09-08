@@ -1,5 +1,6 @@
 import { basename } from "node:path";
-import { CliError } from "./errors.ts";
+import { setTimeout as delay } from "node:timers/promises";
+import { CliError, UsageError } from "./errors.ts";
 import {
   type AgentListing,
   getPaneContext,
@@ -8,6 +9,7 @@ import {
   listAgents,
   listTabs,
   listWorkspaces,
+  type PaneContext,
   promptAgent,
   type TabSummary,
   type WorkspaceSummary,
@@ -208,13 +210,18 @@ export async function runAgents(
   env: Environ,
   home: string,
   all: boolean,
+  context: BusCallContext = {},
 ): Promise<string> {
-  const [agents, tabs, workspaces] = await Promise.all([
+  context.signal?.throwIfAborted();
+  const [agents, tabs, workspaces, pane] = await Promise.all([
     listAgents(call),
     listTabs(call),
     listWorkspaces(call),
+    context.callerPane === undefined ? undefined : getPaneContext(call, context.callerPane),
   ]);
-  const workspaceId = env["HERDR_WORKSPACE_ID"];
+  context.signal?.throwIfAborted();
+  const caller = explicitCaller(agents, pane, context);
+  const workspaceId = caller?.workspaceId ?? env["HERDR_WORKSPACE_ID"];
   const scopedToWorkspace = !all && workspaceId !== undefined && workspaceId !== "";
   const joined = joinBusAgents(agents, tabLabels(tabs), placesByWorkspace(workspaces));
   const scoped = scopedToWorkspace
@@ -228,7 +235,39 @@ export async function runAgents(
   return renderBusAgents(scoped, { home, places: !scopedToWorkspace });
 }
 
-export interface MessageOptions {
+export interface BusCallContext {
+  /** Per-call identity for shared servers, never an inherited daemon pane. */
+  callerPane?: string;
+  callerSession?: string;
+  signal?: AbortSignal;
+}
+
+function explicitCaller(
+  agents: readonly AgentListing[],
+  pane: PaneContext | undefined,
+  context: BusCallContext,
+): AgentListing | undefined {
+  if (context.callerPane === undefined) return undefined;
+  const matches = agents.filter((agent) => agent.paneId === context.callerPane);
+  const caller = matches[0];
+  if (
+    matches.length !== 1 ||
+    caller === undefined ||
+    pane === undefined ||
+    pane.tabId !== caller.tabId ||
+    pane.sessionValue !== caller.sessionValue ||
+    (context.callerSession !== undefined && context.callerSession !== caller.sessionValue)
+  ) {
+    throw new CliError(
+      "bus_sender_unavailable",
+      "the supplied caller pane has no unique live agent or no longer matches its expected session and placement",
+      "read the caller's current runtime identity and use its actual pane and socket",
+    );
+  }
+  return caller;
+}
+
+export interface MessageOptions extends BusCallContext {
   /** Linger and retry a blocked or not-ready target until the deadline,
    * instead of failing on the first rejection. */
   waitUnblocked?: boolean;
@@ -247,7 +286,9 @@ export async function runMessage(
   text: string,
   options: MessageOptions = {},
 ): Promise<string> {
-  const paneId = env["HERDR_PANE_ID"];
+  if (text === "") throw new UsageError("message needs non-empty text");
+  options.signal?.throwIfAborted();
+  const paneId = options.callerPane ?? env["HERDR_PANE_ID"];
   if (paneId === undefined || paneId === "") {
     throw new CliError(
       "bus_outside_pane",
@@ -261,9 +302,11 @@ export async function runMessage(
     listWorkspaces(call),
     getPaneContext(call, paneId),
   ]);
+  options.signal?.throwIfAborted();
+  const caller = explicitCaller(agents, pane, options);
   const labels = tabLabels(tabs);
   const places = placesByWorkspace(workspaces);
-  const senderWorkspaceId = env["HERDR_WORKSPACE_ID"] ?? null;
+  const senderWorkspaceId = caller?.workspaceId ?? env["HERDR_WORKSPACE_ID"] ?? null;
   const resolution = resolveTarget(
     joinBusAgents(agents, labels, places),
     target,
@@ -301,7 +344,9 @@ export async function runMessage(
   const agent = resolution.agent;
   const waitUnblocked = options.waitUnblocked ?? false;
   const timeoutMs = options.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
-  const sleep = options.sleep ?? Bun.sleep;
+  const sleep =
+    options.sleep ??
+    (options.signal ? (ms: number) => delay(ms, undefined, { signal: options.signal }) : Bun.sleep);
   const now = options.now ?? Date.now;
   const deadline = now() + timeoutMs;
   const composed = composeBusMessage(sender, text);
@@ -310,6 +355,7 @@ export async function runMessage(
   // between observing the state and delivering into it.
   let delivered: { status: string };
   for (;;) {
+    options.signal?.throwIfAborted();
     try {
       delivered = await promptAgent(call, agent.paneId, composed);
       break;

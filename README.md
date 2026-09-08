@@ -4,6 +4,25 @@ AgentSurface ties the `~/code/agent*` fleet to [herdr](https://github.com/wilkys
 the terminal workspace manager fleet agents run inside. Its integrations host
 fleet TUIs, name conversations, connect agents, and guard terminal commands.
 
+## Producer MCP
+
+`agentsurface mcp` serves `agents`, `message`, and `guide` over stdio, registered
+with Executor by AgentStart. The tools derive from the authored command
+contract and call the same typed bus handlers as the terminal. The operator
+and internal routes below retain their existing behavior.
+
+Every bus call supplies an absolute `socket-path` and `caller-pane` from the
+calling runtime's Herdr environment. Optional `caller-session` verifies its
+native session ID. The adapter checks the live pane and agent listings and
+derives the workspace and sender name from them; it never inherits a shared
+daemon's caller identity or mutates the process environment for a call.
+
+Listings and delivery confirmations stay plain text. The guide keeps its fleet
+envelope. MCP domain errors preserve the original code, message, and recovery
+in that envelope, with both structured data and standalone JSON text. Terminal
+output stays unchanged. Cancellation stops waiting and reaps active Herdr
+children; if a prompt was in flight, reconcile delivery before resending.
+
 ## Confirmation
 
 ```sh

@@ -209,7 +209,7 @@ describe("the fields adoption asked for", () => {
     const blocking = walkCommands()
       .filter((node) => node.command.blocking === true)
       .map((node) => node.path);
-    expect(blocking.sort()).toEqual(["confirm", "host", "message"]);
+    expect(blocking.sort()).toEqual(["confirm", "host", "mcp", "message"]);
   });
 
   test("only guide --json is anything but a per-call knob", () => {
@@ -237,7 +237,7 @@ describe("help renders from the contract", () => {
   test("--agent-help carries the guidance verbatim and only the agent verbs", () => {
     const agentHelp = renderAgentHelp();
     expect(agentHelp).toContain("Opening moves:");
-    expect(agentHelp).toContain("names change, and a");
+    expect(agentHelp.replace(/\s+/g, " ")).toContain("names change, and a");
     expect(agentHelp).toContain("agentsurface message <target> <text>");
     // The internal entrypoints are named in the guidance as things not to
     // call, but never offered as invocations.

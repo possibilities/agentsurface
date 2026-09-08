@@ -88,6 +88,18 @@ async function main(argv: string[]): Promise<number> {
     console.log(VERSION);
     return 0;
   }
+  if (first === "mcp") {
+    try {
+      parseInvocation("mcp", argv.slice(1));
+      const { serveAgentsurfaceMcp } = await import("./mcp.ts");
+      await serveAgentsurfaceMcp();
+      return 0;
+    } catch (error) {
+      if (error instanceof UsageError) return usage(error);
+      console.error(error instanceof Error ? error.message : String(error));
+      return 1;
+    }
+  }
   if (first === "guide") {
     // The contract itself. Every other help surface in this CLI renders from
     // the same document, so there is nothing here authored twice.

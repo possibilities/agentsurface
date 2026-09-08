@@ -31,10 +31,15 @@ export function herdrBinary(env: Environ): string {
   return env["HERDR_BIN_PATH"] ?? "herdr";
 }
 
-export function createHerdrCall(env: Environ, sessionName?: string): HerdrCall {
+export function createHerdrCall(
+  env: Environ,
+  sessionName?: string,
+  options: { signal?: AbortSignal } = {},
+): HerdrCall {
   const binary = herdrBinary(env);
   const prefix = sessionName === undefined ? [] : ["--session", sessionName];
   return async (args) => {
+    options.signal?.throwIfAborted();
     let proc: ReturnType<typeof Bun.spawn>;
     try {
       proc = Bun.spawn([binary, ...prefix, ...args], {
@@ -46,29 +51,45 @@ export function createHerdrCall(env: Environ, sessionName?: string): HerdrCall {
     } catch (error) {
       throw new HerdrError(`${binary} could not be run: ${(error as Error).message}`);
     }
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout as ReadableStream).text(),
-      new Response(proc.stderr as ReadableStream).text(),
-    ]);
-    const exitCode = await proc.exited;
-    for (const stream of [stdout, stderr]) {
-      if (stream.trim() === "") continue;
-      try {
-        const parsed = JSON.parse(stream);
-        if (typeof parsed === "object" && parsed !== null) return parsed as HerdrResponse;
-      } catch {
-        // Not JSON; try the other stream, then report the raw text below.
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const stop = () => {
+      if (proc.exitCode !== null) return;
+      proc.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        if (proc.exitCode === null) proc.kill("SIGKILL");
+      }, 1_000);
+    };
+    options.signal?.addEventListener("abort", stop, { once: true });
+    if (options.signal?.aborted) stop();
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout as ReadableStream).text(),
+        new Response(proc.stderr as ReadableStream).text(),
+        proc.exited,
+      ]);
+      options.signal?.throwIfAborted();
+      for (const stream of [stdout, stderr]) {
+        if (stream.trim() === "") continue;
+        try {
+          const parsed = JSON.parse(stream);
+          if (typeof parsed === "object" && parsed !== null) return parsed as HerdrResponse;
+        } catch {
+          // Not JSON; try the other stream, then report the raw text below.
+        }
       }
+      // Herdr's reporting commands answer nothing on success: the change
+      // landed and there is no body to send. Silence with a zero exit is that
+      // answer, not a failure — reading it as one made every sidebar token
+      // publish report an error for a write that had already succeeded, which
+      // left a real failure indistinguishable from an ordinary success.
+      if (exitCode === 0) return {};
+      throw new HerdrError(
+        `herdr ${args.join(" ")}: ${stderr.trim() || stdout.trim() || "no response"}`,
+      );
+    } finally {
+      options.signal?.removeEventListener("abort", stop);
+      if (killTimer !== undefined) clearTimeout(killTimer);
     }
-    // Herdr's reporting commands answer nothing on success: the change
-    // landed and there is no body to send. Silence with a zero exit is that
-    // answer, not a failure — reading it as one made every sidebar token
-    // publish report an error for a write that had already succeeded, which
-    // left a real failure indistinguishable from an ordinary success.
-    if (exitCode === 0) return {};
-    throw new HerdrError(
-      `herdr ${args.join(" ")}: ${stderr.trim() || stdout.trim() || "no response"}`,
-    );
   };
 }
 
