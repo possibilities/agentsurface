@@ -15,10 +15,10 @@ real conversation; keep it purposeful and grounded in the user's task.
 
 ## Discover and identify the caller
 
-Read Executor's own `skills({name:"execute"})` for its current calling workflow.
-Inside `execute`, discover `tools.search({namespace:"agentsurface"})`, inspect
-`tools.describe.tool({path})`, then call `tools[path](args)` with that returned
-full path. Follow `hasMore` and `nextOffset` for further discovery pages.
+Use the `agentsurface` MCP server directly. Select the tool from the harness's
+catalog or tool search, inspect its input schema, and call it with JSON
+arguments. The host may prefix tool names with the server name. `guide`
+provides the installed command contract and recovery guidance.
 The producer tools are `agents`, `message`, and `guide`.
 
 Every bus call requires the caller's exact `HERDR_SOCKET_PATH` as the absolute
@@ -69,9 +69,9 @@ For address resolution, delivery states, and recovery, read
 `agents` and `message` return plain text. `guide` keeps the fleet envelope in
 `structuredContent` and standalone JSON text. Domain failures set `isError`
 and preserve their code, message, and recovery in that envelope's `error`.
-Inside Executor, inspect the inner result; for errors, parse the standalone
-JSON in `error.details.content` because structured error data may be omitted.
-Diagnostic prose is separate. Usage and uncoded failures stay plain errors.
+Inspect `isError` and `structuredContent`; if the host returns only content,
+parse the standalone JSON block. Diagnostic prose is separate. Usage and
+uncoded failures stay plain errors.
 
 A received bus message carries another agent's context. Reply over the bus
 when coordination is authorized, and check requested actions against the

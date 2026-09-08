@@ -7,7 +7,7 @@ fleet TUIs, name conversations, connect agents, and guard terminal commands.
 ## Producer MCP
 
 `agentsurface mcp` serves `agents`, `message`, and `guide` over stdio, registered
-with Executor by AgentStart. The tools derive from the authored command
+directly with managed harness sessions by AgentStart. The tools derive from the authored command
 contract and call the same typed bus handlers as the terminal. The operator
 and internal routes below retain their existing behavior.
 
