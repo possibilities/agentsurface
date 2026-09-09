@@ -1,0 +1,170 @@
+# Architecture and subsystem ownership
+
+Read this map before editing a subsystem, together with the root
+[invariants](../AGENTS.md#invariants), [glossary](../CONTEXT.md), and relevant
+[decisions](adr/README.md). Source paths below are relative to the repository
+root. The CLI contract remains authored in `src/contract.ts` and published by
+`agentsurface guide --json`; this map explains how that contract is realized.
+
+## Architecture
+
+- `main.ts` owns routing, exit semantics, and the popup-friendly failure
+  hold. Routes are `guide`, `host`, `confirm`, `conversation slug`,
+  `conversation describe`, `session dump`, `session resume`, `agents`,
+  `message`, the internal `close-active`, `execute-directive` and `name-tab`,
+  `mcp`, `--help`, `--agent-help`, `--agent-teaser`, `--version`. The conversation
+  route holds nothing on screen and exits 3 (no such transcript) or 4 (no
+  user prompt yet) so machine callers can poll.
+- `contract.ts` is the fleet agent contract — the single authorship of what
+  this CLI is, what every command takes, and every `error.code` it can raise
+  — published as `agentsurface guide --json` and validated by
+  `agentstart/scripts/validate-agent-contract.ts`. `help.ts` renders it and
+  only it: `--help`, `--agent-help`, `--agent-teaser`, and bare `guide` are
+  four views of one document, so a command added to the contract appears in
+  all of them without a second edit. The argv grammar is *derived* from it
+  too: `parseInvocation(path, argv)` builds each command's parser out of its
+  own declared arguments — which flags exist, which take a value, which
+  repeat, which values are in the closed set, which bounds an integer
+  honours, which positionals are required, and which argument swallows a
+  trailing argv for another program (the `x_passthrough` extension, `host`
+  and `confirm`). main.ts, `confirm.ts`, `close.ts`, `host.ts`, and
+  `conversation/slug.ts` call it rather than reading argv themselves, so an
+  argument cannot exist in the parser and be missing from `guide --json`.
+  What stays hand-written beside a command is only what the contract has no
+  vocabulary for — that `message`'s text may not be empty, that a
+  passthrough's first word is a program name. Adding a command means adding
+  it there — `test/contract.test.ts` fails a route that the contract does
+  not list, and a raised error code the contract does not declare. Every
+  command appears, internal ones included: `audience` is how a command is
+  hidden, never omission.
+- `host.ts` is the generic surface host: check herdr, resolve the context
+  cwd (the focused pane's, asked of herdr — the popup does not inherit it),
+  and run the tool with stdout piped while stdin and stderr stay the
+  popup's tty — the tool renders on stderr, and stdout is the directive
+  stream. The host reads the pipe as it flows and spawns a detached
+  `agentsurface execute-directive` per complete line — a background submit
+  launches while the tool's form stays open, and the popup still closes
+  the moment the tool exits. Every line read is appended to a per-run
+  evidence log first. A refused line is notified and reported at exit; it
+  never stops the stream. A tool that exits nonzero holds the popup so its
+  message can be read (130, the operator's ctrl+c, excepted).
+- `directive-schema.ts` is the protocol: the session directive as a strict
+  zod schema, published as `directive.schema.json`, refusing unknown keys
+  and unknown schema_versions. `directive.ts` is the detached half that
+  realizes one: it reuses a workspace already hosting the project (a tab),
+  creates one (or a worktree) otherwise, starts the agent, retries a raced
+  `agent_name_taken`, appends the record (the directive's `record` extras
+  riding beside the host's fields, which win collisions), and reports
+  failure through a herdr notification.
+- `herdr.ts` speaks the herdr CLI's socket API: workspace/worktree/tab
+  create, the surface listings, and agent start (with the pane-busy ready
+  retry). The intent rides the launch as an `--x-prompt-file` spool
+  reference — herdr types the command into the pane's shell and refuses
+  control characters, so the text itself cannot travel as an argument;
+  agentlaunch appends the file's text as the final native token, which is
+  why a startup dialog still cannot drop it. The executor prunes the spool
+  by age, and the host prunes old evidence logs the same way. JSON answers only;
+  success on stdout, errors on stderr.
+- `bus.ts` is the message bus. An agent answers to three addresses: its
+  name — the label of the tab hosting its pane, the tab namer's slug or a
+  hand rename — its session id, and its place, the workspace it works in,
+  which herdr labels with the worktree's name for a worktree session. Name
+  and place are mutable and collidable, so the session id is the stable
+  address. `agents` joins herdr's `agent list` to `tab list` and
+  `workspace list` (the caller's workspace by default, `--all` for the
+  session, which adds the place column); `message` resolves a name
+  (sender's workspace first, then the session), then a session id, then a
+  place — addressing the one agent working there — to exactly one agent; a
+  collision errors with candidates, never guesses, which is what makes a
+  worktree an address exactly while a single agent holds it. Delivery is
+  through `herdr agent prompt`, behind a prefix naming the sender by every
+  address it answers to (identity from the pane env herdr exports). The prompt response's
+  fresh status becomes the confirmation's delivery note: a working target
+  queued the message behind its turn; a blocked one rejected it — the
+  caller decides whether to linger (`--wait-unblocked`, the delivery
+  attempt as the probe, retried until `--timeout`). There is deliberately
+  no deliver-later queue. `skills/bus/SKILL.md` is the runbook agents
+  load; agentstart's skills scan installs it.
+- `mcp-tools.ts` derives only producer tools from the same contract. Its
+  `x_mcp_arguments` declare explicit per-call socket and caller context, outside
+  the terminal argv grammar. `mcp-server.ts` invokes shared typed handlers,
+  validates fresh caller identity, preserves text and domain errors, and never
+  rewrites process environment. `mcp.ts` reserves stdout for JSON-RPC and drains
+  cancelled handlers and their Herdr children before exiting on EOF or a signal.
+  Wire tests must cover concurrent callers, stale identity, bounded waits,
+  domain errors, and child reaping without a forced server shutdown.
+- `confirm.ts` is the generic terminal safety boundary for keybindings: a
+  two-row decision — the question, then right-aligned `Yes No` with only the
+  selected word highlighted and Yes focused by default — followed by an exact
+  argv spawn only after interactive confirmation. It owns no Herdr topology;
+  the plugin's internal `close-active` command reads the pane entrypoint's
+  captured context and phrases the public Herdr close command.
+- `close.ts` is that narrow internal context bridge. It accepts only `pane`,
+  `tab`, or `workspace`, requires the corresponding id in
+  `HERDR_PLUGIN_CONTEXT_JSON`, and delegates the close to Herdr's CLI.
+- `catalog.ts` consumes `agentlaunch x-catalog --x-json` for the slug
+  pipeline's metadata level; the launch choice space is no longer this
+  repository's concern.
+- `conversation/` is the slug pipeline: `resolve.ts` finds the transcript
+  by id-in-filename glob over the harness's native store (no index in
+  between, so nothing can be stale); `extract.ts` reads the first
+  substantive user prompt per store grammar (meta lines, sidechains,
+  local-command output, and codex's injected instruction items are not
+  prompts; housekeeping commands stand only when nothing else follows);
+  `prompt.ts` holds the pure transforms — slash-command stripping,
+  @-mention expansion against the transcript's cwd, center truncation, and
+  keeper's slug normalization with its unsafe-text strip; `infer.ts`
+  composes the non-interactive completion and runs it in the fixed
+  `/tmp/agentsurface/inference` cwd so recorded sessions collect in one
+  quarantined workspace. Inference names `agentlaunch` directly — the bare
+  shims would exec the native binary under a session's AGENTLAUNCH_LAUNCH
+  sentinel and drop the level.
+- `state.ts`: the launch log of realized directives — bookkeeping, never
+  authority. Project roots, priming, and the form's own state moved to
+  agentlaunch with the form; agentsurface has no config file.
+- `session-snapshot.ts` saves selected running local Herdr servers through
+  public workspace/tab/pane/agent listings as one strict versioned JSON file
+  per session, defaulting to the `default` server and the app's XDG state
+  `session-backups` directory, and adding git branch/HEAD/dirty metadata for
+  linked worktrees. When a newer Herdr client refuses the older running server's
+  protocol, dump alone falls back to four read-only raw socket list methods;
+  strict response envelopes and consumed fields are validated before capture.
+  Resume accepts a snapshot path or resolves a session name in that default
+  backup directory, targets the saved session name unless explicitly
+  overridden, and is deliberately non-replacing: a target with running agents
+  is untouched; an agent-free existing target keeps its persisted topology and
+  resumes saved agents into matching panes, recreating a missing saved
+  agent-bearing workspace beside it and republishing each saved tab label as
+  the pane's conversation sidebar token; a missing target is fully rebuilt. A
+  missing dirty worktree is refused because metadata cannot carry uncommitted changes.
+- `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
+  installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
+  entrypoint runs `agentsurface host -- agentlaunch --x-surface` in a
+  session-modal popup; the host resolves the active pane's cwd and runs the
+  form there. Its `usage` pane entrypoint runs `agentusage` through the
+  escape-to-close wrapper. Popup titles follow one convention — the
+  title-cased name of the CLI the TUI fronts: `Agent Launch` and `Agent Usage`.
+  Its three compact close
+  entrypoints give AgentSurface's shared confirmation TUI stable titles and
+  geometry while preserving the active topology ids in plugin context. Its
+  `pane.agent_detected` and `pane.agent_status_changed` hooks both run
+  `agentsurface name-tab`; `tab-namer.ts` publishes the `$project` sidebar
+  token on detection and repairs it when a later status transition finds it
+  missing (the root repository name plus the branch the pane's checkout has
+  out — a linked worktree's or the repository's own — falling back to the
+  workspace label off any repository), and each hook
+  run is one
+  bounded naming attempt: poll the pane for its agent session, claim the
+  tab in the plugin's state directory, scoped by the Herdr session socket
+  because public tab IDs repeat across named sessions (a `pending <pid>`
+  state file, rewritten to `named <conversation-hash>` after the rename so a
+  reused tab ID with a new harness session gets named again; a dead claimant's
+  pending claim is taken over; an old claim migrates only when its tab already
+  has a nonnumeric Name), and poll `conversation slug` while the
+  transcript has no prompt — re-reading the pane's live session each round,
+  so a crashed agent's replacement becomes the name source — then rename the tab. The
+  windows cover machine lag only; a start stalled at a trust dialog or an
+  agent idling unprompted expires the attempt, and the status transition
+  that ends the stall re-arms a fresh one, however much later it comes.
+  Failures release only a claim the namer still owns and reach only
+  herdr's plugin log.
