@@ -28,6 +28,19 @@ native session ID, such as Codex's `CODEX_THREAD_ID`. Do not use the shared
 server's environment or guess another pane's identity. If this runtime is not
 in a Herdr pane, use its supported communication tools.
 
+From the caller's native shell tool, read labeled values portably:
+
+```sh
+printf 'HERDR_SOCKET_PATH=%s\nHERDR_PANE_ID=%s\nCODEX_THREAD_ID=%s\n' \
+  "${HERDR_SOCKET_PATH-}" "${HERDR_PANE_ID-}" "${CODEX_THREAD_ID-}"
+```
+
+On macOS, `printenv` accepts only one variable name and silently ignores
+additional names. Output from `printenv HERDR_SOCKET_PATH HERDR_PANE_ID`
+therefore does not show whether the pane ID is set. Recheck with the labeled
+read above before reporting missing identity. An empty `CODEX_THREAD_ID` alone
+is not a missing pane; omit `caller-session` when no native session ID is available.
+
 The adapter resolves workspace and sender names from fresh Herdr state. A
 missing, inconsistent, or reused caller returns `bus_sender_unavailable`.
 Recheck the runtime identity; changing the expected session to somebody else's

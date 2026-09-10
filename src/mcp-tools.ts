@@ -117,6 +117,7 @@ export function serverInstructions(): string {
     "Producer tools are agents, message, and guide. Operator and internal terminal workflows keep their existing entrypoints.",
     "Bus output remains plain text. Guide retains its fleet envelope in structuredContent and standalone JSON text. Domain failures set isError and preserve the original code, message, and recovery in that same envelope shape; the terminal's human output does not change. Usage and unexpected failures without a domain code stay plain tool errors.",
     "Use the caller's actual HERDR_SOCKET_PATH and HERDR_PANE_ID as socket-path and caller-pane. Include caller-session when the runtime supplies its native session ID. Live Herdr state determines workspace and sender names. No tool accepts a binary, environment, or arbitrary command override.",
+    "Read each caller environment variable separately (for example, printenv HERDR_PANE_ID), or use labeled shell printf expansions. macOS printenv silently ignores all variable names after the first; omitted output from a multi-name printenv call is not evidence of missing pane identity. Recheck before reporting that the caller is outside Herdr.",
     "Messages need the task's authorization. Delivery confirmation is not proof of reading. Cancellation stops waiting and reaps active Herdr calls; if a prompt was in flight its delivery may be uncertain, so reconcile before resending. Native harness tools still handle subagent communication.",
   ].join("\n\n");
 }

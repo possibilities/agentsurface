@@ -66,6 +66,12 @@ A definite rejection with its domain code is different from a lost response.
 | `bus_target_not_ready` | Retry only when readiness is expected to change |
 | `bus_outside_pane` | The terminal caller lacks a Herdr pane identity |
 
+Before declaring runtime identity missing, read each variable separately or
+use the labeled `printf` in the skill. macOS `printenv` reads only its first
+variable argument, even when more were supplied; the omitted values were not
+checked. A genuine missing value differs from `bus_sender_unavailable`, which
+means the supplied identity failed live validation.
+
 Herdr's own coded failures remain intact when they reach MCP. Errors without
 a domain code, including usage and connection failures, remain plain tool
 errors. Fix an invalid argument or unavailable socket before retrying. Do not
