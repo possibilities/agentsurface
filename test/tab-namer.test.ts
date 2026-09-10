@@ -217,7 +217,7 @@ describe("reportSidebarProjectToken", () => {
       if (args[0] === "worktree" && args[1] === "list") {
         return {
           result: {
-            source: { repo_name: "agentdemo", source_checkout_path: "/worktrees/clear-valley" },
+            source: { repo_name: "agentdemo", source_checkout_path: "/code/agentdemo" },
             worktrees: [
               { branch: "main", path: "/code/agentdemo" },
               { branch: "worktree/clear-valley-003a", path: "/worktrees/clear-valley" },

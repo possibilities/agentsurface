@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { HARNESS_NAMES, type HarnessName } from "./conversation/resolve.ts";
 import { conversationSlug } from "./conversation/slug.ts";
 import { CliError } from "./errors.ts";
@@ -103,7 +103,9 @@ export function parsePaneEvent(eventJson: string): PaneEvent | null {
  * does not follow the pane, so a workspace opened before its directory
  * became a repository carries none at all. One `worktree list` from the
  * pane's cwd answers both halves — its `source` names the repository, and
- * the matching entry names the branch. */
+ * the entry containing the pane cwd names the branch. (`source_checkout_path`
+ * is the repository's canonical checkout, not necessarily the checkout that
+ * contains the requested cwd.) */
 export async function reportSidebarProjectToken(call: HerdrCall, paneId: string): Promise<void> {
   const paneResult = (await invoke(call, ["pane", "get", paneId])) as {
     pane?: { workspace_id?: unknown; cwd?: unknown };
@@ -144,7 +146,7 @@ export async function reportSidebarProjectToken(call: HerdrCall, paneId: string)
  * and the caller badges the workspace label as untracked instead. */
 async function checkoutForCwd(call: HerdrCall, cwd: string): Promise<string | null> {
   let listResult: {
-    source?: { repo_name?: unknown; source_checkout_path?: unknown };
+    source?: { repo_name?: unknown };
     worktrees?: unknown;
   } | null;
   try {
@@ -154,12 +156,19 @@ async function checkoutForCwd(call: HerdrCall, cwd: string): Promise<string | nu
     throw error;
   }
   const repoName = listResult?.source?.repo_name;
-  const checkoutPath = listResult?.source?.source_checkout_path;
   if (typeof repoName !== "string" || repoName === "") return null;
   const entry = Array.isArray(listResult?.worktrees)
-    ? listResult.worktrees.find(
-        (candidate) => (candidate as { path?: unknown }).path === checkoutPath,
-      )
+    ? listResult.worktrees.find((candidate) => {
+        const path = (candidate as { path?: unknown }).path;
+        if (typeof path !== "string" || path === "") return false;
+        const fromCheckout = relative(path, cwd);
+        return (
+          fromCheckout === "" ||
+          (!isAbsolute(fromCheckout) &&
+            fromCheckout !== ".." &&
+            !fromCheckout.startsWith(`..${sep}`))
+        );
+      })
     : undefined;
   const branch = (entry as { branch?: unknown } | undefined)?.branch;
   const displayBranch =
