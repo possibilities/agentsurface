@@ -15,6 +15,7 @@ import {
   listWorkspaces,
   liveAgentNames,
   nextAgentName,
+  promptAgent,
   startAgentWhenReady,
 } from "./herdr.ts";
 import type { Environ } from "./paths.ts";
@@ -23,7 +24,7 @@ import { appendLaunch } from "./state.ts";
 /**
  * Realizing one session directive: create the workspace or worktree
  * (focused or not, by the directive), start the agent with the intent
- * riding the launch as a spool-file reference, and append the launch
+ * delivered through herdr after startup, and append the launch
  * record. Runs detached from the host — a hosted TUI's popup closes with
  * its process, so execution cannot live there — and with no terminal to
  * report to, a failure goes to a herdr notification.
@@ -126,7 +127,6 @@ async function startSession(
   const agentArgs = [...directive.agent.args];
   if (directive.intent !== null && directive.intent !== "") {
     intent.path = writeIntentFile(dirname(logPath), directive.intent);
-    agentArgs.push("--x-prompt-file", intent.path);
   }
   const tried = new Set<string>();
   let name = "";
@@ -162,15 +162,22 @@ async function startSession(
     agent: name,
     named: outcome.named,
   });
+  if (intent.path !== null) {
+    if (!outcome.named) {
+      throw new HerdrError(
+        "the harness started without a confirmed agent name; the prompt was saved for manual delivery",
+      );
+    }
+    await promptAgent(call, name, directive.intent!);
+    unlinkSync(intent.path);
+    intent.path = null;
+  }
 }
 
-/** Herdr types the launch into the pane's interactive shell and refuses
- * control characters in agent arguments, so a multi-line intent cannot ride
- * the argv as literal text. It travels as a spool file instead:
- * agentlaunch's `--x-prompt-file` appends the file's text as the final
- * native token once the shell boundary is behind it. Agentlaunch never
- * deletes the file, and the executor cannot know when it was read, so the
- * spool is pruned by age — one unlink at a time, like the log beside it. */
+/** Preserve a prompt until herdr confirms delivery through agent prompt.
+ * Herdr types launch argv into a shell and refuses control characters, so
+ * the prompt cannot ride launch arguments. An undelivered prompt stays in
+ * this spool for manual recovery and is pruned by age. */
 export function writeIntentFile(
   stateDir: string,
   intent: string,

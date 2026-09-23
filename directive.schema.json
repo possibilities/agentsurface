@@ -29,7 +29,7 @@
         "kind": {
           "type": "string",
           "minLength": 1,
-          "description": "The herdr agent kind to start — a fleet harness name (claude or codex). Herdr runs the kind's bare command, which is the fleet shim into agentlaunch."
+          "description": "The herdr agent kind to start — a fleet harness name (claude or codex). Herdr runs the kind's bare command through PATH."
         },
         "args": {
           "type": "array",
@@ -37,7 +37,7 @@
             "type": "string",
             "description": "One launch argument, typed into the pane by herdr — so no control characters."
           },
-          "description": "Arguments for the agent start, before any intent delivery the host appends. For agentlaunch-shimmed kinds these are --x-* extension flags and native tokens."
+          "description": "Native arguments for the agent start, before the host delivers any intent."
         }
       },
       "required": ["kind", "args"],
@@ -58,7 +58,7 @@
           "type": "null"
         }
       ],
-      "description": "The composed prompt text the session starts with, or null for none. The host spools it to a file and delivers it via agentlaunch's --x-prompt-file, because herdr types the launch and refuses control characters in arguments."
+      "description": "The composed prompt text to deliver after the harness starts, or null for none. The host retains an undelivered prompt in a spool file for recovery."
     },
     "record": {
       "description": "Opaque extras the host merges into its launch record — bookkeeping the emitting tool wants remembered beside the host's own fields.",

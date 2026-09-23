@@ -9,12 +9,12 @@ each subcommand ties `~/code/agent*` tools to the running herdr session. The
 first integration is `host` — run a fleet TUI on the popup's terminal and
 realize every session directive it emits as a herdr workspace (or worktree)
 with an agent started in it. The TUIs themselves live with the tools they
-front (agentlaunch's `--x-surface` launch form is the first); the
+front (the AgentChats resume picker is one); the
 `surface-handoff-protocol` wiki page is the directive contract, and
 `directive.schema.json` its published format. The second is
 `conversation slug` — a short list-ready name for any conversation, derived
-from its first user prompt by the conversation's own harness at the
-catalog's metadata level. The third is the message bus — `agents` and
+from its first user prompt by the conversation's own native harness.
+The third is the message bus — `agents` and
 `message` — agents on the surface listing and messaging each other, with
 herdr delivering each message as typed input. `confirm` is the terminal
 safety boundary for keybindings that must require an explicit decision before
@@ -45,9 +45,9 @@ messaging, conversation inference, session recovery or the Herdr plugin.
   received: strict parse, hard version gate, no defaults, no repair. The
   host never reorders, batches, or coalesces the stream.
 - The launched process is herdr's, started by `herdr agent start` running
-  the bare harness command — which is the fleet shim into agentlaunch. No
-  harness binary is ever resolved or spawned by this repository; slug
-  inference spawns `agentlaunch`, which owns that resolution.
+  the bare harness command — which is AgentStart's permission-only shim. No
+  hosted harness binary is resolved or spawned by this repository; slug
+  inference spawns the native Claude or Codex CLI directly.
 - A bus message reaches its target only through `herdr agent prompt` —
   herdr's own typed-input path; this repository never writes to a pane.
   Delivery is not receipt: the confirmation carries the target's status so
@@ -56,12 +56,12 @@ messaging, conversation inference, session recovery or the Herdr plugin.
   on stdin/stderr, the cwd, and the stdout pipe, and reads nothing back
   but directives and the exit code. Feedback about a directive's fate is the operator's (herdr
   notifications), never the tool's.
-- A launch fails only when no harness ran. `herdr agent start` spawns and
-  then waits to confirm the launch alias; every outcome of that wait —
-  `agent_not_ready`, `timeout`, `agent_name_not_found` — is an unnamed but
-  started launch, recorded with `named: false` and reported to nobody. The
-  intent rides the argv, so the harness submits it on its own schedule. A
-  genuine failure's notification names the spool file holding the prompt.
+- `herdr agent start` spawns and then waits to confirm the launch alias.
+  `agent_not_ready`, `timeout`, and `agent_name_not_found` mean an unnamed but
+  started launch, recorded with `named: false`. With no intent this is a
+  successful launch. With intent, delivery requires a confirmed name; an
+  unconfirmed name or failed delivery reports the retained prompt spool for
+  manual recovery without launching another harness.
 - A project already on the surface gets a tab in its workspace; a
   workspace is created only when none hosts the project. The project's
   basename must match the workspace label; a transient pane foreground cwd
@@ -94,8 +94,8 @@ lives in two siblings, and some changes here must cascade:
 
 - Skills under `skills/<name>/` ship into AgentStart's fixed private
   fleet resources (`~/code/agentstart/scripts/sync-skills`, run six-hourly
-  by the scheduled updater). AgentLaunch loads them into every managed
-  session: Claude Code exposes `/agent:<name>`, and Codex uses
+  by the scheduled updater). Bare permission shims do not load them;
+  explicit roles can expose `/agent:<name>` in Claude Code, and Codex uses
   `$agent:<name>`. A SKILL.md edit is live within
   six hours, or on demand by running that script.
   Skill names and descriptions provide capability discovery; do not add a

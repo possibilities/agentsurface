@@ -161,13 +161,13 @@ describe("the parser is derived from the contract", () => {
   });
 
   test("a passthrough argument hands the rest of argv to the other program", () => {
-    expect(parseInvocation("host", ["--", "agentlaunch", "--x-surface"]).rest).toEqual([
-      "agentlaunch",
-      "--x-surface",
+    expect(parseInvocation("host", ["--", "agentchats", "search"]).rest).toEqual([
+      "agentchats",
+      "search",
     ]);
-    expect(parseInvocation("host", ["agentlaunch", "--x-surface"]).rest).toEqual([
-      "agentlaunch",
-      "--x-surface",
+    expect(parseInvocation("host", ["agentchats", "search"]).rest).toEqual([
+      "agentchats",
+      "search",
     ]);
     expect(() => parseInvocation("host", ["--x-surface"])).toThrow(UsageError);
     expect(() => parseInvocation("host", [])).toThrow(UsageError);
@@ -272,7 +272,6 @@ function sourceFiles(): string[] {
   const root = new URL("../src/", import.meta.url);
   const files = [
     "bus.ts",
-    "catalog.ts",
     "close.ts",
     "confirm.ts",
     "directive-schema.ts",

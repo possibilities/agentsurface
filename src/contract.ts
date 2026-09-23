@@ -121,7 +121,7 @@ export interface Contract {
 /** Routing doctrine, rendered verbatim by `--agent-help`. Its closing
  * paragraph is the operational footer — where state lives and what the CLI
  * needs to run — and `--help` prints that paragraph alone, so keep it last. */
-const GUIDANCE = `AgentSurface integrates fleet tools with the local Herdr terminal surface. Most of its verbs are surface plumbing that herdr's plugin and agentlaunch invoke; the two an agent calls for itself are \`agents\` and \`message\`, the message bus.
+const GUIDANCE = `AgentSurface integrates fleet tools with the local Herdr terminal surface. Most of its verbs are surface plumbing invoked by herdr's plugin and hosted tools; the two an agent calls for itself are \`agents\` and \`message\`, the message bus.
 
 Use \`agents\` when the target or its current state is uncertain. It lists the live agents in your own workspace, and \`--all\` lists the whole session and adds each agent's place. Read the status column before you send: it decides what delivery will mean.
 
@@ -129,7 +129,7 @@ An agent answers to three addresses, and \`message\` resolves them in that order
 
 Delivery is not receipt. herdr types the message into the target's harness exactly like an operator message, behind a prefix naming every address you answer to, so the receiver can reply without any other introduction. An idle or done target reads it as its next turn; a working target queues it behind the turn it is running; a blocked target — one waiting on the operator — rejects it, and nothing was delivered. There is no inbox and no deliver-later queue: a message that cannot be typed now was not sent. \`--wait-unblocked\` lingers and retries until \`--timeout\` (120s by default) and then reports the message undelivered; reach for it when a target is merely busy, not when it is blocked on a human.
 
-The rest of the surface is not an agent interface. \`host\` and \`confirm\` are operator verbs bound to herdr keybindings; \`session dump\` and \`session resume\` are the backup and restore pair an operator drives; \`close-active\`, \`name-tab\`, \`execute-directive\`, and the \`conversation\` pair are subprocess entrypoints that herdr's plugin, the host, and agentlaunch's pickers invoke with context an agent does not have. These routes remain available to their supported operator and internal callers; \`conversation slug\` spends inference on a tab name.
+The rest of the surface is not an agent interface. \`host\` and \`confirm\` are operator verbs bound to herdr keybindings; \`session dump\` and \`session resume\` are the backup and restore pair an operator drives; \`close-active\`, \`name-tab\`, \`execute-directive\`, and the \`conversation\` pair are subprocess entrypoints that herdr's plugin, the host, and hosted pickers invoke with context an agent does not have. These routes remain available to their supported operator and internal callers; \`conversation slug\` spends inference on a tab name.
 
 Bus calls need a running herdr session; guide and MCP discovery work without one. Agents use MCP through the directly connected MCP server, passing their exact socket path and pane ID on every bus call. An optional expected session ID guards against pane reuse. Workspace and sender names come from fresh Herdr state, never the shared server environment. State lives under ~/.local/state/agentsurface (XDG_STATE_HOME honoured): \`launches.jsonl\` records realized directives, \`directives/\` holds a per-run evidence log of every line read off a hosted tool's stdout, and \`session-backups/\` is the default session dump directory. The checked-in \`directive.schema.json\` publishes the session directive format, and the surface-handoff-protocol wiki page is its contract.`;
 
@@ -266,7 +266,7 @@ const HOST_COMMAND: ContractCommand = {
   mutates: true,
   blocking: true,
   guidance:
-    "The host holds the tool's stdout as a pipe — the tool renders on stderr, still the popup's tty — and each complete JSON line it reads becomes a herdr workspace (or worktree) with an agent started in it, at once and detached. The launch form is `agentsurface host -- agentlaunch --x-surface`. Directive failures reach the operator as herdr notifications; the tool never learns what became of one. Runs until the hosted tool exits. An operator verb, not an agent one: herdr's launch keybinding invokes it, and it owns this terminal for as long as the hosted tool draws on it.",
+    "The host holds the tool's stdout as a pipe — the tool renders on stderr, still the popup's tty — and each complete JSON line it reads becomes a herdr workspace (or worktree) with an agent started in it, at once and detached. Directive failures reach the operator as herdr notifications; the tool never learns what became of one. Runs until the hosted tool exits. An operator verb, not an agent one: herdr's picker keybinding invokes it, and it owns this terminal for as long as the hosted tool draws on it.",
   arguments: [
     {
       name: "command",
@@ -281,9 +281,9 @@ const HOST_COMMAND: ContractCommand = {
   ],
   examples: [
     {
-      invocation: "agentsurface host -- agentlaunch --x-surface",
+      invocation: "agentsurface host -- agentchats search",
       description:
-        "The launch form: agentlaunch's picker draws on this terminal and every session it submits is realized on the surface.",
+        "The session picker draws on this terminal and every resume it submits is realized on the surface.",
     },
   ],
 };
@@ -364,7 +364,7 @@ const CONVERSATION_COMMAND: ContractCommand = {
       audience: "internal",
       mutates: true,
       guidance:
-        "Derived from the conversation's first user prompt by its own harness at the agentlaunch catalog's metadata level, so it costs a real inference call — the tab namer's entrypoint, not a lookup. Every computed slug is persisted to the slug store, so read-only surfaces never pay again. Exit 3: no such transcript. Exit 4: the transcript holds no user prompt yet, which is what the tab-naming plugin polls on.",
+        "Derived from the conversation's first user prompt by its own harness, so it costs a real inference call — the tab namer's entrypoint, not a lookup. Every computed slug is persisted to the slug store, so read-only surfaces never pay again. Exit 3: no such transcript. Exit 4: the transcript holds no user prompt yet, which is what the tab-naming plugin polls on.",
       arguments: [
         {
           name: "harness",
@@ -687,27 +687,9 @@ export const CONTRACT: Contract = {
         recovery: "Run the printed command by hand to see the harness's own report.",
       },
       {
-        code: "catalog_no_metadata_level",
-        meaning: "The agentlaunch catalog designates no metadata level for that harness.",
-        recovery: 'Give the harness a "metadata" level in agentlaunch\'s catalog.',
-      },
-      {
-        code: "catalog_unreadable",
-        meaning:
-          "agentlaunch x-catalog printed no envelope, or one this version does not understand.",
-        recovery:
-          "Run `agentlaunch x-catalog --x-json` by hand; update agentsurface and agentlaunch together.",
-      },
-      {
-        code: "catalog_failed",
-        meaning: "agentlaunch x-catalog reported a failure of its own, or exited with no envelope.",
-        recovery: "Run `agentlaunch x-catalog --x-json` by hand.",
-      },
-      {
-        code: "agentlaunch_missing",
-        meaning:
-          "agentlaunch could not be run, so neither the catalog nor slug inference is reachable.",
-        recovery: "Install it: ~/code/agentlaunch/scripts/install.sh --install",
+        code: "harness_missing",
+        meaning: "The native harness could not be run for slug inference.",
+        recovery: "Install the native harness and make it available on PATH.",
       },
       {
         code: "herdr_session_not_found",

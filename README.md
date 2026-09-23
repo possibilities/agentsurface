@@ -48,7 +48,7 @@ captured target is the thing approved even if another client changes focus.
 ## Host
 
 ```sh
-agentsurface host -- agentlaunch --x-surface
+agentsurface host -- agentchats search
 ```
 
 `host` runs one fleet TUI on the current terminal (usually a herdr popup)
@@ -58,9 +58,8 @@ the tool renders on stderr, which stays the popup's tty; each JSON line
 the tool writes to stdout becomes — at once, detached from the tool — a herdr
 workspace (or worktree, or a tab in the workspace already hosting the
 project) with an agent started in its root pane and the directive's intent
-delivered as the first prompt (`herdr agent start` runs the bare harness
-command, the fleet shim into agentlaunch, so balancing, yolo policy, and
-model injection all apply).
+delivered after startup through `herdr agent prompt`. Bare harness commands
+use AgentStart's permission-only shims.
 
 A directive says everything the surface needs: cwd, worktree, focus, the
 agent kind with its launch arguments, the composed intent, and opaque
@@ -72,24 +71,8 @@ directive's fate — execution failures reach the operator as herdr
 notifications, and a refused directive is reported without stopping the
 stream.
 
-The first hosted tool is agentlaunch's `--x-surface` launch form — the
-one-screen, prompt-first launcher that used to live in this repository.
-Its intent editor, project/harness/model/effort choosers, worktree toggle,
-priming, drafts, and project-frequency ordering are all agentlaunch's now;
-see agentlaunch's README.
-
-The bundled herdr plugin declares the launcher as a popup pane titled
-`Agent Launch` — popup titles are by convention the title-cased name of the
-CLI the TUI fronts. AgentStart links the plugin and opens that entrypoint
-from the keybinding:
-
-```toml
-[[keys.command]]
-key = "prefix+l"
-type = "shell"
-command = '"$HERDR_BIN_PATH" plugin pane open --plugin agentsurface --entrypoint launch --cwd "${HERDR_ACTIVE_PANE_CWD:-$PWD}"'
-description = "launch an agent"
-```
+The retired launch form and its `prefix+l` popup are no longer provided.
+AgentStart still links the plugin for the chats picker and other surface tools.
 
 The plugin is also the shared home for fleet TUIs bound to popups. Its `usage`
 entrypoint runs `agentusage` through the escape-to-close wrapper in an 80%
@@ -191,8 +174,8 @@ the sender.
 
 ## Install
 
-Requirements: Bun 1.3.14+, a running herdr session, agentlaunch on PATH
-(with the fleet's bare-harness shims for balanced launches).
+Requirements: Bun 1.3.14+, a running herdr session, and native Claude/Codex
+on PATH behind AgentStart's permission-only shims.
 
 ```sh
 git clone https://github.com/possibilities/agentsurface.git ~/code/agentsurface
@@ -207,8 +190,7 @@ them.
 
 ## State
 
-AgentSurface has no config file — project roots and priming moved to
-agentlaunch's config with the launch form. The launch log at
+AgentSurface has no config file. The launch log at
 `~/.local/state/agentsurface/launches.jsonl` records each realized
 directive (with the emitting tool's record extras riding along), and
 `~/.local/state/agentsurface/directives/` keeps each host run's directive

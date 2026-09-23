@@ -8,11 +8,8 @@ import type { HarnessName } from "./resolve.ts";
 /**
  * The inference half: run the conversation's own harness non-interactively
  * on the built instruction and normalize its answer into a slug. The argv
- * names agentlaunch itself — not the bare shim, whose AGENTLAUNCH_LAUNCH
- * sentinel would exec the native binary when the slug is asked for from
- * inside a session — so balancing and yolo policy ride along exactly as
- * they do for a launch, and the model:effort pair travels as the one
- * --x-level value the catalog designated for metadata completions.
+ * names the conversation's native harness through PATH. The installed
+ * permission shim supplies its default unattended setting.
  *
  * Every call runs in a fixed dedicated cwd so the sessions these
  * completions inevitably record collect under one quarantined workspace
@@ -36,11 +33,10 @@ export interface HarnessInvocation {
 
 export function composeInference(
   harness: HarnessName,
-  metadataLevel: string,
   instruction: string,
   runToken: string,
 ): HarnessInvocation {
-  const launch = ["agentlaunch", "--x-harness", harness, "--x-level", metadataLevel];
+  const launch = [harness];
   if (harness === "claude") {
     return { argv: [...launch, "-p", instruction], lastMessageFile: null };
   }
@@ -59,7 +55,21 @@ export interface InferenceOutcome {
 
 export type InferenceRunner = (argv: string[]) => Promise<InferenceOutcome>;
 
+/** A metadata completion is not an occupant of the pane whose hook launched
+ * it. Strip every Herdr identity/context variable before starting the
+ * hidden harness, or that harness's integration reports its temporary
+ * conversation back onto the real pane and replaces the conversation ref. */
+export function inferenceEnvironment(env: Environ): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined && !entry[0].startsWith("HERDR_"),
+    ),
+  );
+}
+
 export function createInferenceRunner(env: Environ): InferenceRunner {
+  const childEnv = inferenceEnvironment(env);
   return async (argv) => {
     mkdirSync(INFERENCE_CWD, { recursive: true });
     let proc: ReturnType<typeof Bun.spawn>;
@@ -69,13 +79,13 @@ export function createInferenceRunner(env: Environ): InferenceRunner {
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
-        env: env as Record<string, string>,
+        env: childEnv,
       });
     } catch (error) {
       throw new CliError(
-        "agentlaunch_missing",
+        "harness_missing",
         `${argv[0]} could not be run: ${(error as Error).message}`,
-        "install it: ~/code/agentlaunch/scripts/install.sh --install",
+        "install the native harness and make it available on PATH",
       );
     }
     const timer = setTimeout(() => proc.kill(), INFERENCE_TIMEOUT_MS);

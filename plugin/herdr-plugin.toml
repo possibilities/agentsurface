@@ -5,25 +5,8 @@ id = "agentsurface"
 name = "AgentSurface"
 version = "0.12.0"
 min_herdr_version = "0.8.0"
-description = "Launch agents, show usage, confirm topology closes, label projects, and name conversation tabs"
+description = "Resume conversations, show usage, confirm topology closes, label projects, and name conversation tabs"
 platforms = ["macos", "linux"]
-
-# Popup titles follow one convention: the title-cased name of the CLI the TUI
-# is a frontend for — the launch form fronts agentlaunch and the usage dialog
-# fronts agentusage. A new pane entrypoint takes its CLI's name the same way.
-#
-# The launch surface is a session-modal popup over the active pane. The host
-# resolves the active pane's cwd and runs agentlaunch's form there, so the form
-# preselects the project it opened over; directives the form emits become herdr
-# sessions through the host's stdout pipe (the surface-handoff-protocol wiki
-# page is the contract).
-[[panes]]
-id = "launch"
-title = "Agent Launch"
-placement = "popup"
-width = "80%"
-height = "80%"
-command = ["agentsurface", "host", "--", "agentlaunch", "--x-surface"]
 
 # The resume picker is the same host contract as the launch form: the host
 # resolves the active pane's cwd so the picker opens scoped to the project it

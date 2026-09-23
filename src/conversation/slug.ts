@@ -1,6 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import { loadLaunchCatalog } from "../catalog.ts";
 import { parseInvocation } from "../contract.ts";
 import { CliError } from "../errors.ts";
 import type { Environ } from "../paths.ts";
@@ -20,7 +19,7 @@ import { storeSlug } from "./store.ts";
 /**
  * `conversation slug <harness> <id-or-path>`: derive a short list-ready
  * slug from a conversation's first user prompt, using the conversation's
- * own harness at the catalog's metadata level. The distinct exit codes let
+ * own harness. The distinct exit codes let
  * a caller distinguish "wrong reference" from "no prompt yet" — the
  * tab-naming plugin polls on the latter.
  */
@@ -75,22 +74,8 @@ export async function conversationSlug(
       "the conversation has not started; try again after the first prompt",
     );
   }
-  const catalog = await loadLaunchCatalog(env);
-  const level = catalog.find((entry) => entry.harness === harness)?.metadataLevel;
-  if (level === undefined || level === null) {
-    throw new CliError(
-      "catalog_no_metadata_level",
-      `the agentlaunch catalog designates no metadata level for ${harness}`,
-      'give the harness a "metadata" level in agentlaunch\'s catalog',
-    );
-  }
   const excerpt = excerptFrom(extracted.prompt, extracted.cwd ?? dirname(path), home);
-  const invocation = composeInference(
-    harness,
-    level,
-    buildInstruction(excerpt),
-    crypto.randomUUID(),
-  );
+  const invocation = composeInference(harness, buildInstruction(excerpt), crypto.randomUUID());
   const slug = await generateSlug(invocation, createInferenceRunner(env));
   // Inference was paid; the store remembers it so read-only surfaces (the
   // resume picker's `conversation describe`) never pay again.

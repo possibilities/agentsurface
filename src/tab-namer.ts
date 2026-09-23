@@ -256,24 +256,17 @@ function parsePaneSession(
   return { tabId, harness: agent as HarnessName, ref };
 }
 
-/** Recover the native conversation reference from AgentLaunch's own argv when
+/** Recover the native conversation reference from a harness's argv when
  * a resumed harness does not re-report its session to herdr. This happens for
  * conversations adopted from another herdr server: detection still identifies
- * the harness, and the shim's long-lived AgentLaunch process still carries the
- * explicit resume argv, but the pane's `agent_session` remains empty.
+ * the harness, but the pane's `agent_session` remains empty.
  *
  * Stay deliberately narrower than general process inference. A process must
- * name AgentLaunch, must declare the same harness herdr detected, and must use
- * that harness's exact native resume spelling (or AgentLaunch's `--x-resume`). */
+ * name the same harness herdr detected and use its native resume spelling. */
 export function resumedRefFromProcessArgv(argv: string[], harness: HarnessName): string | null {
-  const launchIndex = argv.findIndex((token) => basename(token) === "agentlaunch");
-  if (launchIndex < 0) return null;
-  const tokens = argv.slice(launchIndex + 1);
-  const harnessIndex = tokens.indexOf("--x-harness");
-  if (harnessIndex < 0 || tokens[harnessIndex + 1] !== harness) return null;
-
-  const extensionResume = tokens.indexOf("--x-resume");
-  if (extensionResume >= 0) return resumeValue(tokens[extensionResume + 1]);
+  const harnessIndex = argv.findIndex((token) => basename(token) === harness);
+  if (harnessIndex < 0) return null;
+  const tokens = argv.slice(harnessIndex + 1);
 
   const marker = harness === "codex" ? "resume" : harness === "claude" ? "--resume" : "--session";
   const markerIndex = tokens.indexOf(marker);
@@ -326,7 +319,7 @@ async function resumedPaneSession(
 
 /** One pane read: null while the pane has no reportable agent session. A
  * session for an agent outside the slug's harnesses is a permanent no. A
- * resumed AgentLaunch process can supply the reference when the adopted
+ * resumed native process can supply the reference when the adopted
  * conversation never re-reports its session to herdr. */
 async function paneSession(
   call: HerdrCall,

@@ -6,8 +6,7 @@ import { CliError } from "./errors.ts";
  * source of truth: the host validates every line a hosted tool appends with
  * it, and `scripts/generate-schema.ts` emits `directive.schema.json` from
  * it for the tools on the other side of the handoff. AgentSurface owns the
- * schema because it owns the execution; emitting tools (agentlaunch's
- * `--x-surface` form is the first) target the published file. The
+ * schema because it owns the execution; emitting tools target the published file. The
  * `surface-handoff-protocol` wiki page is the contract.
  */
 
@@ -19,7 +18,7 @@ const agentSchema = z
       .string()
       .min(1)
       .describe(
-        "The herdr agent kind to start — a fleet harness name (claude or codex). Herdr runs the kind's bare command, which is the fleet shim into agentlaunch.",
+        "The herdr agent kind to start — a fleet harness name (claude or codex). Herdr runs the kind's bare command through PATH.",
       ),
     args: z
       .array(
@@ -29,9 +28,7 @@ const agentSchema = z
             "One launch argument, typed into the pane by herdr — so no control characters.",
           ),
       )
-      .describe(
-        "Arguments for the agent start, before any intent delivery the host appends. For agentlaunch-shimmed kinds these are --x-* extension flags and native tokens.",
-      ),
+      .describe("Native arguments for the agent start, before the host delivers any intent."),
   })
   .describe("The agent to start in the created surface's root pane.");
 
@@ -66,7 +63,7 @@ export const sessionDirectiveSchema = z.strictObject({
     .string()
     .nullable()
     .describe(
-      "The composed prompt text the session starts with, or null for none. The host spools it to a file and delivers it via agentlaunch's --x-prompt-file, because herdr types the launch and refuses control characters in arguments.",
+      "The composed prompt text to deliver after the harness starts, or null for none. The host retains an undelivered prompt in a spool file for recovery.",
     ),
   record: z
     .record(z.string(), z.unknown())

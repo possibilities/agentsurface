@@ -28,10 +28,9 @@ afterwards and pruned by age. _Avoid_: sink.
 or worktree, start the agent in its root pane, deliver the intent.
 _Avoid_: run, spawn.
 
-**Intent** — The directive's composed prompt text; it rides the launch as a
-native positional token (via the spool file and `--x-prompt-file`), so the
-harness queues it behind any startup dialog (folder trust) and submits it
-once the dialog clears. _Avoid_: task, message.
+**Intent** — The directive's composed prompt text. The host spools it until
+Herdr confirms startup, then delivers it with `agent prompt`; failures retain
+the spool file for manual recovery. _Avoid_: task, message.
 
 **Project** — The directive's cwd: the directory the session works in. Not
 necessarily a git repository; only the worktree option needs one.
@@ -83,8 +82,5 @@ argv runs. It presents only the caller's question and `Yes / No`, with Yes
 selected; a non-interactive invocation still refuses the command. _Avoid_:
 prompt, approval gate.
 
-**Metadata level** — The catalog's designated cheap `model:effort` pair for
-metadata completions (slugs, and later summaries): declared per harness in
-agentlaunch's catalog, read from `x-catalog` as one `metadata_level` value,
-passed back as one `--x-level`. Distinct from agentlaunch's "utility
-invocation", where model and effort never apply. _Avoid_: utility level.
+**Metadata inference** — Native non-interactive Claude or Codex invocation
+used to derive a conversation slug; it does not select a managed model pair.

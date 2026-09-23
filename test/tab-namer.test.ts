@@ -171,35 +171,19 @@ describe("parsePaneEvent", () => {
 });
 
 describe("resumedRefFromProcessArgv", () => {
-  test("reads AgentLaunch extension and native resume spellings", () => {
+  test("reads native resume spellings", () => {
+    expect(resumedRefFromProcessArgv(["/usr/local/bin/codex", "resume", "abc"], "codex")).toBe(
+      "abc",
+    );
     expect(
-      resumedRefFromProcessArgv(
-        ["bun", "/usr/local/bin/agentlaunch", "--x-harness", "codex", "--x-resume", "abc"],
-        "codex",
-      ),
-    ).toBe("abc");
-    expect(
-      resumedRefFromProcessArgv(
-        ["bun", "/usr/local/bin/agentlaunch", "--x-harness", "codex", "resume", "def"],
-        "codex",
-      ),
+      resumedRefFromProcessArgv(["bun", "/usr/local/bin/codex", "resume", "def"], "codex"),
     ).toBe("def");
-    expect(
-      resumedRefFromProcessArgv(
-        ["agentlaunch", "--x-harness", "claude", "--resume", "ghi"],
-        "claude",
-      ),
-    ).toBe("ghi");
+    expect(resumedRefFromProcessArgv(["claude", "--resume", "ghi"], "claude")).toBe("ghi");
   });
 
-  test("refuses another harness and non-AgentLaunch processes", () => {
-    expect(
-      resumedRefFromProcessArgv(
-        ["agentlaunch", "--x-harness", "claude", "--resume", "abc"],
-        "codex",
-      ),
-    ).toBeNull();
-    expect(resumedRefFromProcessArgv(["codex", "resume", "abc"], "codex")).toBeNull();
+  test("refuses another harness and unrelated processes", () => {
+    expect(resumedRefFromProcessArgv(["claude", "--resume", "abc"], "codex")).toBeNull();
+    expect(resumedRefFromProcessArgv(["python", "resume", "abc"], "codex")).toBeNull();
   });
 });
 
@@ -513,19 +497,12 @@ describe("reportConversationToken", () => {
 });
 
 describe("runTabNamer", () => {
-  test("names an adopted resume from AgentLaunch argv when herdr reports no session", async () => {
+  test("names an adopted resume from native argv when herdr reports no session", async () => {
     const fake = surface(null, {
       paneAgent: "codex",
       foregroundProcesses: [
         {
-          argv: [
-            "bun",
-            "/usr/local/bin/agentlaunch",
-            "--x-harness",
-            "codex",
-            "resume",
-            "foreign-session",
-          ],
+          argv: ["bun", "/usr/local/bin/codex", "resume", "foreign-session"],
         },
       ],
     });

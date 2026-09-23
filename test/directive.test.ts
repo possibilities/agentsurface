@@ -50,7 +50,7 @@ const DIRECTIVE: SessionDirective = {
   cwd: "/code/alpha",
   worktree: false,
   focus: false,
-  agent: { kind: "claude", args: ["--x-level", "fable:max"] },
+  agent: { kind: "claude", args: ["--model", "fable"] },
   intent: "fix it",
   record: { model: "fable", effort: "max", priming: null },
 };
@@ -169,15 +169,10 @@ describe("executeDirective", () => {
     expect(starts[1]?.[2]).not.toBe(starts[0]?.[2]);
     const start = starts[1] ?? [];
     expect(start.slice(3, 7)).toEqual(["--kind", "claude", "--pane", "w9:p1"]);
-    expect(start.slice(start.indexOf("--") + 1)).toEqual([
-      "--x-level",
-      "fable:max",
-      "--x-prompt-file",
-      start[start.length - 1] ?? "",
-    ]);
-    const intentPath = start[start.length - 1] ?? "";
-    expect(intentPath.startsWith(join(dirname(path), "intents"))).toBe(true);
-    expect(readFileSync(intentPath, "utf8")).toBe("fix it");
+    expect(start.slice(start.indexOf("--") + 1)).toEqual(["--model", "fable"]);
+    expect(
+      calls.some((args) => args[0] === "agent" && args[1] === "prompt" && args[3] === "fix it"),
+    ).toBe(true);
     const record = JSON.parse(readFileSync(path, "utf8").trim());
     expect(record.agent).toBe(starts[1]?.[2]);
     expect(record.workspace).toBe("w9");
@@ -230,8 +225,8 @@ describe("executeDirective", () => {
     for (const arg of start ?? []) {
       expect([...arg].some((ch) => ch < " ")).toBe(false);
     }
-    const intentPath = start?.[start.indexOf("--x-prompt-file") + 1] ?? "";
-    expect(readFileSync(intentPath, "utf8")).toBe(intent);
+    expect(calls.find((args) => args[0] === "agent" && args[1] === "prompt")?.[3]).toBe(intent);
+    expect(existsSync(join(dirname(path), "intents"))).toBe(true);
   });
 
   test("a null intent writes no spool file", async () => {
@@ -291,7 +286,7 @@ describe("executeDirective", () => {
     expect(record.harness).toBe("claude");
   });
 
-  test("an unconfirmed name records the launch instead of failing it", async () => {
+  test("an unconfirmed name records the launch and retains undelivered intent", async () => {
     const { call } = fake([
       { result: { panes: [] } },
       { result: { workspaces: [] } },
@@ -300,7 +295,14 @@ describe("executeDirective", () => {
       { error: { code: "timeout", message: "timed out waiting for agent startup" } },
     ]);
     const path = logPath();
-    await executeDirective(call, path, DIRECTIVE);
+    let failure: LaunchFailure | null = null;
+    try {
+      await executeDirective(call, path, DIRECTIVE);
+    } catch (error) {
+      failure = error as LaunchFailure;
+    }
+    expect(failure).toBeInstanceOf(LaunchFailure);
+    expect(readFileSync(failure?.intentPath ?? "", "utf8")).toBe("fix it");
 
     const record = JSON.parse(readFileSync(path, "utf8").trim());
     expect(record.named).toBe(false);
@@ -355,7 +357,7 @@ const RESUME_DIRECTIVE: SessionDirective = {
   cwd: "/code/alpha",
   worktree: false,
   focus: true,
-  agent: { kind: "claude", args: ["--x-resume", "d65ef6c1-8d74-4b1e-989e-d439bd432b9a"] },
+  agent: { kind: "claude", args: ["--resume", "d65ef6c1-8d74-4b1e-989e-d439bd432b9a"] },
   session_id: "d65ef6c1-8d74-4b1e-989e-d439bd432b9a",
   intent: null,
   record: { tool: "agentchats" },
@@ -403,7 +405,7 @@ describe("executeDirective with a session_id", () => {
     expect(calls[0]).toEqual(["agent", "list"]);
     const start = calls.find((args) => args[0] === "agent" && args[1] === "start") ?? [];
     expect(start.slice(start.indexOf("--") + 1)).toEqual([
-      "--x-resume",
+      "--resume",
       "d65ef6c1-8d74-4b1e-989e-d439bd432b9a",
     ]);
     const record = JSON.parse(readFileSync(path, "utf8").trim());

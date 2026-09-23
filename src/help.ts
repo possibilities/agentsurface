@@ -118,7 +118,7 @@ export function renderHelp(): string {
     lines.push(...detail(node, 6));
     lines.push("");
   }
-  lines.push("Internal — invoked by herdr, the host, and agentlaunch, not by hand:");
+  lines.push("Internal — invoked by herdr, the host, and hosted tools, not by hand:");
   for (const node of internal) {
     lines.push(`  ${usageLine(node.path)}`);
     lines.push(...describe(node, 6));

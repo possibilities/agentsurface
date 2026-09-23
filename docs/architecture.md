@@ -58,11 +58,10 @@ root. The CLI contract remains authored in `src/contract.ts` and published by
   failure through a herdr notification.
 - `herdr.ts` speaks the herdr CLI's socket API: workspace/worktree/tab
   create, the surface listings, and agent start (with the pane-busy ready
-  retry). The intent rides the launch as an `--x-prompt-file` spool
-  reference — herdr types the command into the pane's shell and refuses
-  control characters, so the text itself cannot travel as an argument;
-  agentlaunch appends the file's text as the final native token, which is
-  why a startup dialog still cannot drop it. The executor prunes the spool
+  retry). The intent is spooled, then delivered with `agent prompt` after
+  startup is confirmed. Herdr rejects control characters in launch argv,
+  so the text itself cannot travel as an argument. An unconfirmed start or
+  failed delivery retains the spool file for recovery. The executor prunes the spool
   by age, and the host prunes old evidence logs the same way. JSON answers only;
   success on stdout, errors on stderr.
 - `bus.ts` is the message bus. An agent answers to three addresses: its
@@ -102,9 +101,6 @@ root. The CLI contract remains authored in `src/contract.ts` and published by
 - `close.ts` is that narrow internal context bridge. It accepts only `pane`,
   `tab`, or `workspace`, requires the corresponding id in
   `HERDR_PLUGIN_CONTEXT_JSON`, and delegates the close to Herdr's CLI.
-- `catalog.ts` consumes `agentlaunch x-catalog --x-json` for the slug
-  pipeline's metadata level; the launch choice space is no longer this
-  repository's concern.
 - `conversation/` is the slug pipeline: `resolve.ts` finds the transcript
   by id-in-filename glob over the harness's native store (no index in
   between, so nothing can be stale); `extract.ts` reads the first
@@ -116,12 +112,11 @@ root. The CLI contract remains authored in `src/contract.ts` and published by
   keeper's slug normalization with its unsafe-text strip; `infer.ts`
   composes the non-interactive completion and runs it in the fixed
   `/tmp/agentsurface/inference` cwd so recorded sessions collect in one
-  quarantined workspace. Inference names `agentlaunch` directly — the bare
-  shims would exec the native binary under a session's AGENTLAUNCH_LAUNCH
-  sentinel and drop the level.
+  quarantined workspace. The child environment strips every `HERDR_*`
+  variable so the hidden harness cannot report its temporary conversation as
+  the pane's own session. Inference calls the native Claude or Codex CLI.
 - `state.ts`: the launch log of realized directives — bookkeeping, never
-  authority. Project roots, priming, and the form's own state moved to
-  agentlaunch with the form; agentsurface has no config file.
+  authority. AgentSurface has no config file.
 - `session-snapshot.ts` saves selected running local Herdr servers through
   public workspace/tab/pane/agent listings as one strict versioned JSON file
   per session, defaulting to the `default` server and the app's XDG state
@@ -138,12 +133,10 @@ root. The CLI contract remains authored in `src/contract.ts` and published by
   the pane's conversation sidebar token; a missing target is fully rebuilt. A
   missing dirty worktree is refused because metadata cannot carry uncommitted changes.
 - `plugin/` is the herdr plugin (id `agentsurface`), linked by agentstart's
-  installer and the shared home for popup-bound fleet TUIs. Its `launch` pane
-  entrypoint runs `agentsurface host -- agentlaunch --x-surface` in a
-  session-modal popup; the host resolves the active pane's cwd and runs the
-  form there. Its `usage` pane entrypoint runs `agentusage` through the
+  installer and the shared home for popup-bound fleet TUIs. Its `usage`
+  pane entrypoint runs `agentusage` through the
   escape-to-close wrapper. Popup titles follow one convention — the
-  title-cased name of the CLI the TUI fronts: `Agent Launch` and `Agent Usage`.
+  title-cased name of the CLI the TUI fronts, such as `Agent Usage`.
   Its three compact close
   entrypoints give AgentSurface's shared confirmation TUI stable titles and
   geometry while preserving the active topology ids in plugin context. Its

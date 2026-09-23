@@ -5,35 +5,36 @@ import {
   generateSlug,
   INFERENCE_CWD,
   type InferenceOutcome,
+  inferenceEnvironment,
 } from "../src/conversation/infer.ts";
 import { excerptFrom } from "../src/conversation/slug.ts";
 import type { CliError } from "../src/errors.ts";
 
 describe("composeInference", () => {
-  test("each harness gets its native non-interactive shape behind one --x-level", () => {
-    const claude = composeInference("claude", "haiku:low", "the instruction", "t1");
-    expect(claude.argv).toEqual([
-      "agentlaunch",
-      "--x-harness",
-      "claude",
-      "--x-level",
-      "haiku:low",
-      "-p",
-      "the instruction",
-    ]);
+  test("each harness gets its native non-interactive shape", () => {
+    const claude = composeInference("claude", "the instruction", "t1");
+    expect(claude.argv).toEqual(["claude", "-p", "the instruction"]);
     expect(claude.lastMessageFile).toBeNull();
 
-    const codex = composeInference("codex", "gpt-5.4-mini:low", "the instruction", "t2");
-    expect(codex.argv.slice(0, 6)).toEqual([
-      "agentlaunch",
-      "--x-harness",
-      "codex",
-      "--x-level",
-      "gpt-5.4-mini:low",
-      "exec",
-    ]);
+    const codex = composeInference("codex", "the instruction", "t2");
+    expect(codex.argv.slice(0, 2)).toEqual(["codex", "exec"]);
     expect(codex.argv).toContain("--output-last-message");
     expect(codex.lastMessageFile).toContain("t2");
+  });
+});
+
+describe("inferenceEnvironment", () => {
+  test("removes the parent pane's Herdr identity from the hidden harness", () => {
+    expect(
+      inferenceEnvironment({
+        PATH: "/bin",
+        HOME: "/home/me",
+        HERDR_ENV: "1",
+        HERDR_PANE_ID: "w1:p1",
+        HERDR_PLUGIN_EVENT_JSON: "{}",
+        UNSET: undefined,
+      }),
+    ).toEqual({ PATH: "/bin", HOME: "/home/me" });
   });
 });
 
@@ -41,13 +42,13 @@ describe("generateSlug", () => {
   const ok = (stdout: string): InferenceOutcome => ({ stdout, stderr: "", exitCode: 0 });
 
   test("a clean answer becomes the slug", async () => {
-    const invocation = composeInference("claude", "haiku:low", "x", "t");
+    const invocation = composeInference("claude", "x", "t");
     const slug = await generateSlug(invocation, async () => ok("Conversation Slug Subcommand\n"));
     expect(slug).toBe("conversation-slug-subcommand");
   });
 
   test("a failed attempt retries once, then reports the harness's failure", async () => {
-    const invocation = composeInference("claude", "haiku:low", "x", "t");
+    const invocation = composeInference("claude", "x", "t");
     const calls: string[][] = [];
     const slug = await generateSlug(invocation, async (argv) => {
       calls.push(argv);
@@ -67,7 +68,7 @@ describe("generateSlug", () => {
   });
 
   test("codex answers arrive through the last-message file", async () => {
-    const invocation = composeInference("codex", "gpt-5.4-mini:low", "x", crypto.randomUUID());
+    const invocation = composeInference("codex", "x", crypto.randomUUID());
     mkdirSync(INFERENCE_CWD, { recursive: true });
     writeFileSync(invocation.lastMessageFile as string, "Rate Limiter Design\n");
     const slug = await generateSlug(invocation, async () => ok("event noise"));

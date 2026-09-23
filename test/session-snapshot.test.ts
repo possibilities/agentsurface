@@ -414,7 +414,7 @@ describe("session snapshot resume", () => {
       "--timeout",
       "120000",
       "--",
-      "--x-resume",
+      "resume",
       "session-123",
     ]);
     expect(service.calls.map((call) => call.args)).toContainEqual([
@@ -513,7 +513,7 @@ describe("session snapshot resume", () => {
       "--timeout",
       "120000",
       "--",
-      "--x-resume",
+      "resume",
       "session-123",
     ]);
   });
@@ -590,12 +590,12 @@ describe("session snapshot resume", () => {
       "--timeout",
       "120000",
       "--",
-      "--x-resume",
+      "resume",
       "session-123",
     ]);
   });
 
-  test("fleet harnesses resume through AgentLaunch rather than native open argv", async () => {
+  test("fleet harnesses resume with native argv", async () => {
     for (const harness of ["claude", "codex"] as const) {
       const saved = snapshot();
       const agent = saved.session.workspaces[0]?.tabs[0]?.panes[0]?.agent;
@@ -632,7 +632,7 @@ describe("session snapshot resume", () => {
         "--timeout",
         "120000",
         "--",
-        "--x-resume",
+        ...(harness === "claude" ? ["--resume"] : ["resume"]),
         "session-123",
       ]);
     }
